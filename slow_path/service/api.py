@@ -12,9 +12,6 @@ app = FastAPI(title="SlowPath VLM")
 worker = Worker()
 _loop_started = False
 
-TRIGGER_SEEN_ROIS = 0
-TRIGGER_ENQUEUED_ROIS = 0
-
 class InferReq(BaseModel):
     frame_id: int
     track_id: int
@@ -57,6 +54,8 @@ def _percentiles(vals):
 
 @app.get("/metrics")
 def metrics():
+    seen = getattr(app.state, "trigger_seen", 0)
+    enq  = getattr(app.state, "trigger_enq", 0)
     return {
         "worker": {"queue_depth": worker.queue.qsize(),
         "results_size": len(worker.results),
@@ -64,17 +63,18 @@ def metrics():
         "cache_posts": {"ok": worker.cache_ok, "fail": worker.cache_fail},
         "jobs_enqueued_total": worker.jobs_enqueued_total},
         "trigger": {
-            "seen": TRIGGER_SEEN_ROIS,
-            "enqueued": TRIGGER_ENQUEUED_ROIS,
-            "enqueue_rate": (
-                TRIGGER_ENQUEUED_ROIS / TRIGGER_SEEN_ROIS if TRIGGER_SEEN_ROIS else 0.0
-            )
-            }
+            "seen": seen,
+            "enqueued": enq,
+            "enqueue_rate": (enq / seen) if seen else 0.0,
+        },
     }
 
 @app.on_event("startup")
 async def startup():
     global _loop_started
+    # initialize counters once per process
+    app.state.trigger_seen = 0
+    app.state.trigger_enq = 0
     if not _loop_started:
         asyncio.create_task(worker.run())
         _loop_started = True
@@ -106,19 +106,18 @@ class TickReq(BaseModel):
 
 @app.post("/trigger/tick")
 async def trigger_tick(req: TickReq):
-
     # decode full frame once
     img = Image.open(io.BytesIO(base64.b64decode(req.image_b64))).convert("RGB")
     frame_rgb = np.array(img)  # HWC, RGB
 
     enqueued = []
     for roi in req.rois:
-        TRIGGER_SEEN_ROIS += 1
+        app.state.trigger_seen += 1
         tid = int(roi["track_id"])
         bbox = [int(v) for v in roi["bbox"]]
         should, _ = trigger.should_enqueue(req.frame_id, frame_rgb, bbox, tid, _prev_gray_cache)
         if should:
-            TRIGGER_ENQUEUED_ROIS += 1
+            app.state.trigger_enq += 1
             # crop to send a lighter payload to /infer
             x,y,w,h = bbox
             crop = img.crop((x,y,x+w,y+h))
