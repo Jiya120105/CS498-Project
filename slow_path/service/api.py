@@ -58,10 +58,10 @@ def metrics():
     enq  = getattr(app.state, "trigger_enq", 0)
     return {
         "worker": {"queue_depth": worker.queue.qsize(),
-        "results_size": len(worker.results),
-        "infer_latency_ms": _percentiles(worker.infer_lat_ms),
-        "cache_posts": {"ok": worker.cache_ok, "fail": worker.cache_fail},
-        "jobs_enqueued_total": worker.jobs_enqueued_total},
+            "results_size": len(worker.results),
+            "infer_latency_ms": _percentiles(worker.infer_lat_ms),
+            "cache_posts": {"ok": worker.cache_ok, "fail": worker.cache_fail},
+            "jobs_enqueued_total": worker.jobs_enqueued_total },
         "trigger": {
             "seen": seen,
             "enqueued": enq,

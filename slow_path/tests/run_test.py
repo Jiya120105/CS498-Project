@@ -75,6 +75,7 @@ def main():
         print("queue_depth:", w.get("queue_depth"))
         print("results_size:", w.get("results_size"))
         print("infer_latency_ms:", w.get("infer_latency_ms"))
+        print("cache_posts", w.get("cache_posts"))
         if "batching" in m:
             print("batching:", m["batching"])
         if "jobs" in m:

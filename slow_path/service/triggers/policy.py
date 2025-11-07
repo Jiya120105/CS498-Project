@@ -4,10 +4,10 @@ from typing import Dict, Tuple
 
 @dataclass
 class TriggerConfig:
-    every_N: int = 15            # run slow-path every 15 frames
+    every_N: int = 10            # run slow-path every 15 frames
     diff_thresh: float = 12.0    # mean abs-diff threshold (0..255)
-    min_gap: int = 0             # at least 5 frames between triggers per track
-    cooldown: int = 0            # avoid re-triggering immediately after a diff trigger
+    min_gap: int = 2             # at least 5 frames between triggers per track
+    cooldown: int = 1            # avoid re-triggering immediately after a diff trigger
 
 class TriggerPolicy:
     def __init__(self, cfg: TriggerConfig = TriggerConfig()):
