@@ -75,17 +75,3 @@ Integration checklist
 - Person 4 (Evaluation): add periodic sampling of `cache.get_stats()` to dashboards.
 - Person 3 (Semantic Cache owner): optionally provide a small `cache_adapter.py` with thin wrappers matching your team's data shapes.
 
-Copy-ready message to the team
-
-Subject: Semantic cache integration (FastPath + VLM) — quick instructions
-
-Body:
-- I implemented a thread-safe semantic cache in `semantic_cache.py`. It provides `get_batch` (fast-path reader), `CacheEntry.from_vlm_output` (slow-path writer helper), and metrics via `get_stats()`.
-- TTL is 15 frames (entries older than 15 frames are treated as stale).
-- Usage:
-  - Fast path: call `cache.get_batch(track_ids, frame_no)` every frame and use returned `CacheEntry` for rendering. Treat `None` as miss and schedule for slow-path VLM.
-  - Slow path: after VLM inference, build an entry with `CacheEntry.from_vlm_output(...)` and `cache.put(...)`.
-  - Evaluation: sample `cache.get_stats()` periodically.
-- Thread-safety: safe for concurrent readers and writers.
-
-If you want, I can add a tiny `cache_adapter.py` exposing 1–2 helper functions tailored to our tracker and VLM output shapes.
