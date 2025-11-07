@@ -138,3 +138,90 @@ async def trigger_tick(req: TickReq):
             worker.jobs_enqueued_total += 1
 
     return {"enqueued_track_ids": enqueued, "count": len(enqueued)}
+
+
+# -- Programmatic API (small surface) -------------------------------------
+"""
+The public, programmatic surface for other modules:
+
+- ServiceClient: a lightweight synchronous client that runs the FastAPI app
+  in-process (uses TestClient). It triggers the app startup which will start
+  the background worker and exposes convenience methods: infer, trigger_tick,
+  result, metrics, health and close().
+
+- enqueue_infer: async helper to enqueue a Job directly onto the worker
+  queue (useful when calling from an async context within the same process).
+
+These keep other modules free from HTTP wiring while reusing the same
+application/worker implementation used by the server.
+"""
+
+from fastapi.testclient import TestClient
+
+
+class ServiceClient:
+    """Synchronous, in-process client for using the slow-path service.
+
+    Example:
+        svc = ServiceClient()
+        res = svc.infer(frame_id=1, track_id=2, bbox=[0,0,10,10], image_b64=..., prompt_hint="")
+        svc.close()
+    """
+    def __init__(self):
+        # creating TestClient will run startup events (which start the worker loop)
+        self._client = TestClient(app)
+
+    def infer(self, frame_id: int, track_id: int, bbox: list[int], image_b64: str, prompt_hint: str | None = None):
+        payload = {
+            "frame_id": frame_id,
+            "track_id": track_id,
+            "bbox": bbox,
+            "image_b64": image_b64,
+            "prompt_hint": prompt_hint,
+        }
+        r = self._client.post("/infer", json=payload)
+        r.raise_for_status()
+        return r.json()
+
+    def trigger_tick(self, frame_id: int, image_b64: str, rois: list[dict], prompt_hint: str | None = None):
+        payload = {"frame_id": frame_id, "image_b64": image_b64, "rois": rois, "prompt_hint": prompt_hint}
+        r = self._client.post("/trigger/tick", json=payload)
+        r.raise_for_status()
+        return r.json()
+
+    def result(self, job_id: str):
+        r = self._client.get("/result", params={"job_id": job_id})
+        r.raise_for_status()
+        return r.json()
+
+    def metrics(self):
+        r = self._client.get("/metrics")
+        r.raise_for_status()
+        return r.json()
+
+    def health(self):
+        r = self._client.get("/health")
+        r.raise_for_status()
+        return r.json()
+
+    def close(self):
+        try:
+            self._client.close()
+        except Exception:
+            pass
+
+
+async def enqueue_infer(frame_id: int, track_id: int, bbox: list[int], image_b64: str, prompt_hint: str | None = None) -> str:
+    """Enqueue a job directly on the worker queue. Returns job_id.
+
+    This is an async helper intended for use inside an existing asyncio
+    context/process. It does not start the worker loop; ensure the worker
+    is running (for example by creating a ServiceClient which runs startup
+    handlers) before relying on background processing.
+    """
+    job_id = str(uuid.uuid4())
+    prompt = prompt_hint or 'Return JSON: {"label": "<category>", "confidence": <0..1>, "metadata": {...}}'
+    await worker.queue.put(Job(job_id, frame_id, track_id, bbox, image_b64, prompt))
+    worker.jobs_enqueued_total += 1
+    return job_id
+
