@@ -11,5 +11,6 @@ Public symbols:
 """
 
 from .api import ServiceClient, enqueue_infer, trigger_tick, trigger_tick as trigger_tick_endpoint
+from .worker import get_local_cache
 
-__all__ = ["ServiceClient", "enqueue_infer", "trigger_tick", "trigger_tick_endpoint"]
+__all__ = ["ServiceClient", "enqueue_infer", "trigger_tick", "trigger_tick_endpoint", "get_local_cache"]

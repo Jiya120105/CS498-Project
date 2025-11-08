@@ -1,4 +1,4 @@
-import asyncio, time
+import asyncio, time, os
 from dataclasses import dataclass
 from typing import Optional, Dict, Any
 from PIL import Image
@@ -8,6 +8,31 @@ from .models.loader import load_model
 from .schema import CacheRecord
 from .client import post_cache_record
 from .timing import TimerStats
+
+
+# Optional in-process semantic cache integration. If the environment
+# variable USE_LOCAL_SEMANTIC_CACHE is set to "1", the worker will
+# store results in a local SemanticCache instance instead of posting to
+# the external cache HTTP endpoint. This is useful for testing or
+# single-process deployments where `semantic_cache.SemanticCache` should
+# be the authoritative store.
+_use_local_cache = os.getenv("USE_LOCAL_SEMANTIC_CACHE", "0") == "1"
+_local_cache = None
+if _use_local_cache:
+    try:
+        from semantic_cache import CacheEntry, SemanticCache
+        _local_cache = SemanticCache()
+    except Exception:
+        _local_cache = None
+
+
+def get_local_cache():
+    """Return the in-process SemanticCache instance if enabled, else None.
+
+    Other modules can call this to access the same cache instance used by
+    the worker when `USE_LOCAL_SEMANTIC_CACHE=1`.
+    """
+    return _local_cache
 
 
 @dataclass
@@ -55,7 +80,19 @@ class Worker:
                     ttl=5,
                     metadata=out.get("metadata", {})
                 ).model_dump()
-                ok = post_cache_record(record)
+                # If a local semantic cache is configured, put the entry there
+                # and treat that as a successful post. Otherwise call the
+                # external cache HTTP endpoint.
+                ok = False
+                if _local_cache is not None:
+                    try:
+                        ce = CacheEntry.from_vlm_output(job.track_id, out, job.bbox, job.frame_id)
+                        _local_cache.put(ce)
+                        ok = True
+                    except Exception:
+                        ok = False
+                else:
+                    ok = post_cache_record(record)
                 if ok: self.cache_ok += 1
                 else: self.cache_fail += 1
 

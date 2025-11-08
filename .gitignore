@@ -1,0 +1,19 @@
+# Byte-compiled / cache files
+__pycache__/
+*.pyc
+
+# Ignore virtual environments
+venv/
+.env/
+
+# macOS system files
+.DS_Store
+
+# Ignore other common Python artifacts
+*.egg-info/
+dist/
+build/
+
+# Generated figures
+*.png
+*.csv
