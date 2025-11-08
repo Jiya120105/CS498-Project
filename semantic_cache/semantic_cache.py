@@ -74,6 +74,8 @@ class SemanticCache:
         self._hits: int = 0
         self._misses: int = 0
         self._max_size: Optional[int] = max_size
+        # Track number of evictions for diagnostics
+        self._evictions: int = 0
 
     def get(self, track_id: int, current_frame: int) -> Optional[CacheEntry]:
         """Return CacheEntry for track_id if present and not stale.
@@ -157,6 +159,8 @@ class SemanticCache:
                 try:
                     oldest_tid = min(self._cache.items(), key=lambda kv: kv[1].timestamp)[0]
                     del self._cache[oldest_tid]
+                    # record eviction
+                    self._evictions += 1
                 except ValueError:
                     # empty cache, nothing to evict
                     pass
@@ -177,11 +181,12 @@ class SemanticCache:
             self._cache.clear()
             self._hits = 0
             self._misses = 0
+            self._evictions = 0
 
     def get_stats(self) -> Dict[str, float]:
         """Return simple statistics about the cache.
 
-        The returned dict contains: hits, misses, hit_rate, cache_size
+        The returned dict contains: hits, misses, hit_rate, cache_size, evictions
         """
         with self._lock:
             # compute hit rate inline to avoid nested lock issues
@@ -192,4 +197,5 @@ class SemanticCache:
                 "misses": self._misses,
                 "hit_rate": hit_rate,
                 "cache_size": len(self._cache),
+                "evictions": self._evictions,
             }
