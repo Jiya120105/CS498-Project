@@ -106,6 +106,12 @@ class TickReq(BaseModel):
 
 @app.post("/trigger/tick")
 async def trigger_tick(req: TickReq):
+    # Initialize state if not already done (for TestClient compatibility)
+    if not hasattr(app.state, 'trigger_seen'):
+        app.state.trigger_seen = 0
+    if not hasattr(app.state, 'trigger_enq'):
+        app.state.trigger_enq = 0
+    
     # decode full frame once
     img = Image.open(io.BytesIO(base64.b64decode(req.image_b64))).convert("RGB")
     frame_rgb = np.array(img)  # HWC, RGB

@@ -3,8 +3,9 @@ Evaluation package for MOT tracking
 """
 from .dataset_loader import MOTDataset, BoundingBox
 from .metrics import compute_mota, compute_idf1, compute_deadline_hit_rate, evaluate_sequence
-from .visualization import visualize_frame, create_comparison_video, plot_metrics_comparison
-from .baselines import NaiveVLMBaseline, FastOnlyBaseline, HybridBaseline, run_baseline_comparison
+from .fast_path_integration import FastPathProcessor
+from .slow_path_integration import SlowPathProcessor
+from .hybrid_integration import HybridProcessor
 
 __all__ = [
     'MOTDataset',
@@ -13,12 +14,8 @@ __all__ = [
     'compute_idf1',
     'compute_deadline_hit_rate',
     'evaluate_sequence',
-    'visualize_frame',
-    'create_comparison_video',
-    'plot_metrics_comparison',
-    'NaiveVLMBaseline',
-    'FastOnlyBaseline',
-    'HybridBaseline',
-    'run_baseline_comparison'
+    'FastPathProcessor',
+    'SlowPathProcessor',
+    'HybridProcessor',
 ]
 
