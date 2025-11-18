@@ -1,6 +1,6 @@
 """
 Evaluation Metrics for MOT
-Implements MOTA, IDF1, and deadline hit-rate
+Implements MOTA, IDF1, MOTP, track fragmentation, mostly tracked/lost, and deadline hit-rate
 """
 import numpy as np
 from typing import Dict, List, Tuple
@@ -220,6 +220,247 @@ def compute_idf1(gt_data: Dict[int, List[BoundingBox]],
     }
 
 
+def compute_motp(gt_data: Dict[int, List[BoundingBox]], 
+                pred_data: Dict[int, List[BoundingBox]],
+                iou_threshold: float = 0.5) -> Dict:
+    """
+    Compute MOTP (Multiple Object Tracking Precision)
+    
+    MOTP measures the precision of bounding box localization.
+    It's the average IoU of all matched detections.
+    
+    Returns:
+        Dictionary with MOTP score and statistics
+    """
+    all_frames = sorted(set(list(gt_data.keys()) + list(pred_data.keys())))
+    
+    matched_ious = []
+    total_matches = 0
+    
+    for frame in all_frames:
+        gt_boxes = gt_data.get(frame, [])
+        pred_boxes = pred_data.get(frame, [])
+        
+        if len(gt_boxes) == 0 or len(pred_boxes) == 0:
+            continue
+        
+        # Compute IoU matrix
+        iou_matrix = np.zeros((len(gt_boxes), len(pred_boxes)))
+        for i, gt_box in enumerate(gt_boxes):
+            for j, pred_box in enumerate(pred_boxes):
+                iou_matrix[i, j] = iou(gt_box.bbox, pred_box.bbox)
+        
+        # Greedy matching
+        matched_gt = set()
+        matched_pred = set()
+        
+        # Sort by IoU descending
+        matches = []
+        for i in range(len(gt_boxes)):
+            for j in range(len(pred_boxes)):
+                if iou_matrix[i, j] >= iou_threshold:
+                    matches.append((iou_matrix[i, j], i, j))
+        
+        matches.sort(reverse=True)
+        
+        for iou_val, i, j in matches:
+            if i not in matched_gt and j not in matched_pred:
+                matched_gt.add(i)
+                matched_pred.add(j)
+                matched_ious.append(iou_val)
+                total_matches += 1
+    
+    # Compute MOTP
+    if total_matches == 0:
+        motp = 0.0
+    else:
+        motp = np.mean(matched_ious)
+    
+    return {
+        'MOTP': motp,
+        'total_matches': total_matches,
+        'avg_iou': motp,
+        'min_iou': np.min(matched_ious) if matched_ious else 0.0,
+        'max_iou': np.max(matched_ious) if matched_ious else 0.0
+    }
+
+
+def compute_track_fragmentation(gt_data: Dict[int, List[BoundingBox]], 
+                               pred_data: Dict[int, List[BoundingBox]],
+                               iou_threshold: float = 0.5) -> Dict:
+    """
+    Compute track fragmentation metrics
+    
+    Fragmentation (Frag): Number of times a ground truth track is fragmented
+    (i.e., matched to different predicted track IDs across frames)
+    
+    Returns:
+        Dictionary with fragmentation metrics
+    """
+    all_frames = sorted(set(list(gt_data.keys()) + list(pred_data.keys())))
+    
+    # Build ground truth tracks
+    gt_tracks = defaultdict(list)  # gt_id -> [(frame, bbox), ...]
+    for frame in all_frames:
+        for gt_box in gt_data.get(frame, []):
+            gt_tracks[gt_box.track_id].append((frame, gt_box))
+    
+    # Track ID mappings per frame
+    frame_mappings = {}  # frame -> {gt_id: pred_id}
+    
+    for frame in all_frames:
+        gt_boxes = gt_data.get(frame, [])
+        pred_boxes = pred_data.get(frame, [])
+        
+        if len(gt_boxes) == 0 or len(pred_boxes) == 0:
+            frame_mappings[frame] = {}
+            continue
+        
+        # Compute IoU matrix
+        iou_matrix = np.zeros((len(gt_boxes), len(pred_boxes)))
+        for i, gt_box in enumerate(gt_boxes):
+            for j, pred_box in enumerate(pred_boxes):
+                iou_matrix[i, j] = iou(gt_box.bbox, pred_box.bbox)
+        
+        # Greedy matching
+        matched_gt = set()
+        matched_pred = set()
+        matches = []
+        for i in range(len(gt_boxes)):
+            for j in range(len(pred_boxes)):
+                if iou_matrix[i, j] >= iou_threshold:
+                    matches.append((iou_matrix[i, j], i, j))
+        
+        matches.sort(reverse=True)
+        
+        frame_mapping = {}
+        for iou_val, i, j in matches:
+            if i not in matched_gt and j not in matched_pred:
+                matched_gt.add(i)
+                matched_pred.add(j)
+                gt_id = gt_boxes[i].track_id
+                pred_id = pred_boxes[j].track_id
+                frame_mapping[gt_id] = pred_id
+        
+        frame_mappings[frame] = frame_mapping
+    
+    # Count fragmentations per GT track
+    total_frag = 0
+    track_frag_counts = {}
+    
+    for gt_id, tracklet in gt_tracks.items():
+        frames = sorted([f for f, _ in tracklet])
+        frag_count = 0
+        prev_pred_id = None
+        
+        for frame in frames:
+            if frame in frame_mappings and gt_id in frame_mappings[frame]:
+                pred_id = frame_mappings[frame][gt_id]
+                if prev_pred_id is not None and pred_id != prev_pred_id:
+                    frag_count += 1
+                prev_pred_id = pred_id
+        
+        track_frag_counts[gt_id] = frag_count
+        total_frag += frag_count
+    
+    return {
+        'fragmentation': total_frag,
+        'avg_fragmentation_per_track': total_frag / len(gt_tracks) if gt_tracks else 0.0,
+        'total_gt_tracks': len(gt_tracks),
+        'tracks_with_fragmentation': sum(1 for f in track_frag_counts.values() if f > 0)
+    }
+
+
+def compute_mostly_tracked_lost(gt_data: Dict[int, List[BoundingBox]], 
+                               pred_data: Dict[int, List[BoundingBox]],
+                               iou_threshold: float = 0.5) -> Dict:
+    """
+    Compute Mostly Tracked (MT) and Mostly Lost (ML) metrics
+    
+    MT: Percentage of tracks tracked for >= 80% of their lifetime
+    ML: Percentage of tracks tracked for < 20% of their lifetime
+    
+    Returns:
+        Dictionary with MT, ML, and track completeness metrics
+    """
+    all_frames = sorted(set(list(gt_data.keys()) + list(pred_data.keys())))
+    
+    # Build ground truth tracks
+    gt_tracks = defaultdict(list)  # gt_id -> [(frame, bbox), ...]
+    for frame in all_frames:
+        for gt_box in gt_data.get(frame, []):
+            gt_tracks[gt_box.track_id].append((frame, gt_box))
+    
+    # Track which frames each GT track is matched
+    frame_matches = defaultdict(set)  # gt_id -> set of matched frames
+    
+    for frame in all_frames:
+        gt_boxes = gt_data.get(frame, [])
+        pred_boxes = pred_data.get(frame, [])
+        
+        if len(gt_boxes) == 0 or len(pred_boxes) == 0:
+            continue
+        
+        # Compute IoU matrix
+        iou_matrix = np.zeros((len(gt_boxes), len(pred_boxes)))
+        for i, gt_box in enumerate(gt_boxes):
+            for j, pred_box in enumerate(pred_boxes):
+                iou_matrix[i, j] = iou(gt_box.bbox, pred_box.bbox)
+        
+        # Greedy matching
+        matched_gt = set()
+        matched_pred = set()
+        matches = []
+        for i in range(len(gt_boxes)):
+            for j in range(len(pred_boxes)):
+                if iou_matrix[i, j] >= iou_threshold:
+                    matches.append((iou_matrix[i, j], i, j))
+        
+        matches.sort(reverse=True)
+        
+        for iou_val, i, j in matches:
+            if i not in matched_gt and j not in matched_pred:
+                matched_gt.add(i)
+                matched_pred.add(j)
+                gt_id = gt_boxes[i].track_id
+                frame_matches[gt_id].add(frame)
+    
+    # Compute MT, ML, and track completeness
+    mostly_tracked = 0
+    mostly_lost = 0
+    track_completeness = []
+    
+    for gt_id, tracklet in gt_tracks.items():
+        total_frames = len(tracklet)
+        matched_frames = len(frame_matches[gt_id])
+        
+        if total_frames == 0:
+            continue
+        
+        completeness = matched_frames / total_frames
+        track_completeness.append(completeness)
+        
+        if completeness >= 0.8:
+            mostly_tracked += 1
+        elif completeness < 0.2:
+            mostly_lost += 1
+    
+    total_tracks = len(gt_tracks)
+    mt_percentage = (mostly_tracked / total_tracks * 100) if total_tracks > 0 else 0.0
+    ml_percentage = (mostly_lost / total_tracks * 100) if total_tracks > 0 else 0.0
+    avg_completeness = np.mean(track_completeness) if track_completeness else 0.0
+    
+    return {
+        'mostly_tracked': mostly_tracked,
+        'mostly_lost': mostly_lost,
+        'partially_tracked': total_tracks - mostly_tracked - mostly_lost,
+        'MT_percentage': mt_percentage,
+        'ML_percentage': ml_percentage,
+        'avg_track_completeness': avg_completeness,
+        'total_gt_tracks': total_tracks
+    }
+
+
 def compute_deadline_hit_rate(processing_times: List[float], 
                               frame_rate: float = 30.0) -> Dict:
     """
@@ -274,6 +515,18 @@ def evaluate_sequence(gt_data: Dict[int, List[BoundingBox]],
     # IDF1
     idf1_results = compute_idf1(gt_data, pred_data)
     results.update(idf1_results)
+    
+    # MOTP
+    motp_results = compute_motp(gt_data, pred_data)
+    results.update(motp_results)
+    
+    # Track Fragmentation
+    frag_results = compute_track_fragmentation(gt_data, pred_data)
+    results.update(frag_results)
+    
+    # Mostly Tracked / Mostly Lost
+    mt_ml_results = compute_mostly_tracked_lost(gt_data, pred_data)
+    results.update(mt_ml_results)
     
     # Deadline hit rate
     if processing_times:
