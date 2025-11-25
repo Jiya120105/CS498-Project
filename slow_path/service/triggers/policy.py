@@ -5,9 +5,10 @@ from typing import Dict, Tuple
 @dataclass
 class TriggerConfig:
     every_N: int = 10            # run slow-path every 15 frames
-    diff_thresh: float = 12.0    # mean abs-diff threshold (0..255)
+    diff_thresh: float = 8.0     # mean abs-diff threshold (0..255)
     min_gap: int = 2             # at least 5 frames between triggers per track
     cooldown: int = 1            # avoid re-triggering immediately after a diff trigger
+    ttl_frames: int = 14         # explicit semantic TTL in frames
 
 class TriggerPolicy:
     def __init__(self, cfg: TriggerConfig = TriggerConfig()):
@@ -23,7 +24,7 @@ class TriggerPolicy:
         if roi.size == 0: return None
         return cv2.cvtColor(roi, cv2.COLOR_RGB2GRAY)
 
-    def should_enqueue(self, frame_id: int, frame_rgb: np.ndarray, bbox, track_id: int, prev_gray_cache):
+    def should_enqueue(self, frame_id: int, frame_rgb: np.ndarray, bbox, track_id: int, prev_gray_cache, last_semantic_tick: dict):
         cfg = self.cfg
         last_frame, last_trig = self.state.get(track_id, (-10**9, -10**9))
 
@@ -43,7 +44,18 @@ class TriggerPolicy:
             diff = float(np.mean(np.abs(g.astype(np.int16) - prev_g.astype(np.int16))))
             changed = (diff >= cfg.diff_thresh) and (frame_id - last_trig >= cfg.cooldown)
 
-        should = periodic or changed
+
+        # TTL expiry: force refresh if too old
+        last = last_semantic_tick.get(track_id, -10**9)
+        expired = (frame_id - last) >= self.cfg.ttl_frames
+
+        should = expired or periodic or changed
         self.state[track_id] = (frame_id, frame_id if should else last_trig)
         prev_gray_cache[track_id] = g
-        return should, prev_gray_cache
+
+        reason = {
+            "expired": expired,
+            "everyN": periodic,
+            "scene_change": changed,
+        }
+        return should, prev_gray_cache, reason

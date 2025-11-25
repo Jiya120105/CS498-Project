@@ -1,9 +1,10 @@
-import asyncio, uuid, base64, io
+import asyncio, uuid, base64, io, time
 from typing import Optional
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
 from PIL import Image
 import numpy as np
+from collections import defaultdict
 
 from .worker import Worker, Job
 from .triggers.policy import TriggerPolicy, TriggerConfig
@@ -25,6 +26,7 @@ class TriggerConfigDTO(BaseModel):
     diff_thresh: float
     min_gap: int
     cooldown: int
+    ttl_frames: int        
 
 @app.get("/config/get")
 def get_config():
@@ -33,40 +35,87 @@ def get_config():
         "every_N": cfg.every_N,
         "diff_thresh": cfg.diff_thresh,
         "min_gap": cfg.min_gap,
-        "cooldown": cfg.cooldown
+        "cooldown": cfg.cooldown,
+        "ttl_frames": cfg.ttl_frames,
     }}
 
 @app.post("/config/set")
 def set_config(new: TriggerConfigDTO):
-    trigger.cfg.every_N    = new.every_N
+    trigger.cfg.every_N     = new.every_N
     trigger.cfg.diff_thresh = new.diff_thresh
     trigger.cfg.min_gap     = new.min_gap
     trigger.cfg.cooldown    = new.cooldown
+    trigger.cfg.ttl_frames  = new.ttl_frames     
     return {"ok": True, "trigger": new.model_dump()}
 
-def _percentiles(vals):
-    if not vals: return {}
-    a = sorted(vals); n=len(a)
+# Helper to compute rolling percentiles
+def rolling_percentiles(samples, window=200):
+    if not samples:
+        return {}
+    s = samples[-window:]  # last N samples
+    s_sorted = sorted(s)
+    n = len(s_sorted)
     def p(q): 
         idx = int(q*(n-1))
-        return float(a[idx])
-    return {"count": n, "p50": p(0.5), "p95": p(0.95), "max": a[-1]}
+        return float(s_sorted[idx])
+    return {"count": n, "p50": p(0.5), "p95": p(0.95), "p99": p(0.99), "max": s_sorted[-1]}
 
 @app.get("/metrics")
 def metrics():
+    # --- Worker stats ---
+    infer_stats = rolling_percentiles(worker.infer_lat_ms)
+    error_count = sum(1 for r in worker.results.values() if r.get("status")=="error")
+    success_count = sum(1 for r in worker.results.values() if r.get("status")=="done")
+    throughput = success_count / max(1, sum(worker.infer_lat_ms)/1000.0)  # jobs/sec approximate
+
+    # --- Trigger stats ---
     seen = getattr(app.state, "trigger_seen", 0)
     enq  = getattr(app.state, "trigger_enq", 0)
+    changed  = getattr(app.state, "trigger_changed", 0)
+    expired = getattr(app.state, "ttl_expired_total", 0)
+    periodic = getattr(app.state, "trigger_periodic", 0)
+    enqueue_rate = (enq / seen) if seen else 0.0
+
+    # --- Cache stats ---
+    cache_total = worker.cache_ok + worker.cache_fail
+    cache_hit_ratio = (worker.cache_ok / cache_total) if cache_total else 0.0
+
+    # --- Optional: confidence stats per label ---
+    confidences = defaultdict(list)
+    for r in worker.results.values():
+        if r.get("status")=="done":
+            conf = r["record"].get("confidence")
+            label = r["record"].get("label")
+            if conf is not None and label is not None:
+                confidences[label].append(conf)
+    conf_stats = {lbl: rolling_percentiles(lst) for lbl, lst in confidences.items()}
+
     return {
-        "worker": {"queue_depth": worker.queue.qsize(),
+        "worker": {
+            "queue_depth": worker.queue.qsize(),
             "results_size": len(worker.results),
-            "infer_latency_ms": _percentiles(worker.infer_lat_ms),
-            "cache_posts": {"ok": worker.cache_ok, "fail": worker.cache_fail},
-            "jobs_enqueued_total": worker.jobs_enqueued_total },
+            "infer_latency_ms": infer_stats,
+            "jobs_enqueued_total": worker.jobs_enqueued_total,
+            "jobs_success": success_count,
+            "jobs_error": error_count,
+            "throughput_jobs_per_sec": throughput,
+        },
         "trigger": {
             "seen": seen,
             "enqueued": enq,
-            "enqueue_rate": (enq / seen) if seen else 0.0,
+            "changed_scene": changed,
+            "expired_total": expired,
+            "periodic": periodic,
+            "enqueue_rate": enqueue_rate,
         },
+        "cache": {
+            "ok": worker.cache_ok,
+            "fail": worker.cache_fail,
+            "hit_ratio": cache_hit_ratio,
+        },
+        "model_output": {
+            "confidence_stats_per_label": conf_stats
+        }
     }
 
 @app.on_event("startup")
@@ -75,6 +124,10 @@ async def startup():
     # initialize counters once per process
     app.state.trigger_seen = 0
     app.state.trigger_enq = 0
+    app.state.trigger_changed = 0
+    app.state.last_semantic_tick = {}
+    app.state.ttl_expired_total = 0
+    app.state.trigger_periodic = 0
     if not _loop_started:
         asyncio.create_task(worker.run())
         _loop_started = True
@@ -121,9 +174,20 @@ async def trigger_tick(req: TickReq):
         app.state.trigger_seen += 1
         tid = int(roi["track_id"])
         bbox = [int(v) for v in roi["bbox"]]
-        should, _ = trigger.should_enqueue(req.frame_id, frame_rgb, bbox, tid, _prev_gray_cache)
+        should, _, why = trigger.should_enqueue(
+            req.frame_id, frame_rgb, bbox, tid, _prev_gray_cache, app.state.last_semantic_tick
+        )
+
+        if not should:
+            continue
         if should:
             app.state.trigger_enq += 1
+            if why.get("scene_change"): app.state.trigger_changed += 1
+            if why.get("expired"): app.state.ttl_expired_total += 1
+            if why.get("everyN"): app.state.trigger_periodic += 1
+
+            app.state.last_semantic_tick[tid] = req.frame_id
+
             # crop to send a lighter payload to /infer
             x,y,w,h = bbox
             crop = img.crop((x,y,x+w,y+h))
