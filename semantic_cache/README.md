@@ -119,7 +119,6 @@ cache.put(entry)
 ```
 semantic_cache/
 ├── README.md                  # This file
-├── FOR_REPORT.md              # Metrics and graphs for your report
 ├── semantic_cache.py          # Core implementation
 ├── examples/
 │   ├── integration_example.py       # Standalone demo (99.3% hit rate)
