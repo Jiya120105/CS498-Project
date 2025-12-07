@@ -139,9 +139,15 @@ def health():
 @app.post("/infer")
 async def infer(req: InferReq):
     job_id = str(uuid.uuid4())
-    prompt = (req.prompt_hint or
-              'Return JSON: {"label": "<category>", "confidence": <0..1>, "metadata": {...}}')
-    await worker.queue.put(Job(job_id, req.frame_id, req.track_id, req.bbox, req.image_b64, prompt))
+    prompt = req.prompt_hint or 'Return JSON: {"label": "<category>", "confidence": <0..1>}'
+    
+    # decode image from base64 -> numpy array
+    img = Image.open(io.BytesIO(base64.b64decode(req.image_b64))).convert("RGB")
+    frame_rgb = np.array(img)
+
+    await worker.queue.put(
+        Job(job_id, req.frame_id, req.track_id, req.bbox, frame_rgb, prompt)
+    )
     return {"job_id": job_id}
 
 @app.get("/result")
@@ -153,12 +159,17 @@ _prev_gray_cache = {}  # track_id -> gray ROI
 
 class TickReq(BaseModel):
     frame_id: int
-    image_b64: str                     # full frame RGB
+    image_b64: str # full frame RGB
     rois: list[dict] = Field(default_factory=list)  # [{track_id:int, bbox:[x,y,w,h]}]
     prompt_hint: str | None = None
 
 @app.post("/trigger/tick")
 async def trigger_tick(req: TickReq):
+    asyncio.create_task(process_tick(req))
+    return {"accepted": True} # Non-blocking
+
+# Process tick in the backend
+async def process_tick(req: TickReq):
     # Initialize state if not already done (for TestClient compatibility)
     if not hasattr(app.state, 'trigger_seen'):
         app.state.trigger_seen = 0
@@ -188,19 +199,13 @@ async def trigger_tick(req: TickReq):
 
             app.state.last_semantic_tick[tid] = req.frame_id
 
-            # crop to send a lighter payload to /infer
-            x,y,w,h = bbox
-            crop = img.crop((x,y,x+w,y+h))
-            buf = io.BytesIO(); crop.save(buf, format="JPEG")
-            roi_b64 = base64.b64encode(buf.getvalue()).decode()
             jid = str(uuid.uuid4())
-
             await worker.queue.put(
                 Job(job_id=jid,
                     frame_id=req.frame_id,
                     track_id=tid,
                     bbox=bbox,
-                    image_b64=roi_b64,
+                    frame_rgb=frame_rgb,
                     prompt=req.prompt_hint or "")
             )
             

@@ -53,14 +53,15 @@ def main():
             # Many policies accept a hint; if not used in your code, ignore
             payload["force"] = True
         try:
-            r = requests.post(tick_url, json=payload, timeout=2.5)
+            r = requests.post(tick_url, json=payload, timeout=5)
             js = r.json()
-            enq += js.get("count", 0)
-            sent += 1
+            if js.get("accepted"):
+                sent += 1
             if k % args.fps == 0:
-                print(f"[t={k/args.fps:>4.1f}s] enqueued this second: {js.get('count', 0)} (total enq={enq})")
+                print(f"[t={k/args.fps:>4.1f}s] tick accepted (total sent={sent})")
         except Exception as e:
             print("tick error:", e)
+            
         # maintain cadence
         elapsed = time.time() - (t0 + k*period)
         sleep = period - elapsed
