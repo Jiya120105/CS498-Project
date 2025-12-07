@@ -142,7 +142,7 @@ class SemanticCache:
                 results[tid] = entry
         return results
 
-    def put(self, entry: CacheEntry) -> None:
+    def put(self, entry: CacheEntry) -> bool:
         """Store or update a CacheEntry in the cache.
 
         If the cache would grow beyond the configured max_size when adding a
@@ -150,21 +150,31 @@ class SemanticCache:
 
         Args:
             entry: CacheEntry to store
+        
+        Returns:
+            bool: True if the entry was stored (possibly with eviction).
+                False if the cache failed to store the entry.
         """
         with self._lock:
-            # Evict oldest if adding a new key would exceed capacity
-            is_new = entry.track_id not in self._cache
-            if is_new and self._max_size is not None and len(self._cache) >= self._max_size:
-                # remove the entry with the smallest timestamp
-                try:
-                    oldest_tid = min(self._cache.items(), key=lambda kv: kv[1].timestamp)[0]
-                    del self._cache[oldest_tid]
-                    # record eviction
-                    self._evictions += 1
-                except ValueError:
-                    # empty cache, nothing to evict
-                    pass
-            self._cache[entry.track_id] = entry
+            try:
+                # Evict oldest if adding a new key would exceed capacity
+                is_new = entry.track_id not in self._cache
+                if is_new and self._max_size is not None and len(self._cache) >= self._max_size:
+                    # remove the entry with the smallest timestamp
+                    try:
+                        oldest_tid = min(self._cache.items(), key=lambda kv: kv[1].timestamp)[0]
+                        del self._cache[oldest_tid]
+                        # record eviction
+                        self._evictions += 1
+                    except ValueError:
+                        # empty cache, nothing to evict
+                        pass
+                self._cache[entry.track_id] = entry
+                return True
+            except Exception:
+                # any unexpected failure
+                return False
+
 
     def get_hit_rate(self) -> float:
         """Return the hit rate as hits / (hits + misses).

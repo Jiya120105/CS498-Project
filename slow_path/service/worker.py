@@ -6,6 +6,7 @@ import io, base64
 
 from .models.loader import load_model
 from .schema import CacheRecord
+from semantic_cache.semantic_cache import CacheEntry, SemanticCache
 from .client import post_cache_record
 from .timing import TimerStats
 
@@ -18,7 +19,6 @@ _use_local_cache = os.getenv("USE_LOCAL_SEMANTIC_CACHE", "0") == "1"
 _local_cache = None
 if _use_local_cache:
     try:
-        from semantic_cache import CacheEntry, SemanticCache
         _local_cache = SemanticCache()
     except Exception:
         _local_cache = None
@@ -92,6 +92,7 @@ class Worker:
                     ttl=5,
                     metadata=out.get("metadata", {})
                 ).model_dump()
+
                 # If a local semantic cache is configured, put the entry there
                 # and treat that as a successful post. Otherwise call the
                 # external testing cache HTTP endpoint.
@@ -104,7 +105,17 @@ class Worker:
                     except Exception:
                         ok = False
                 else:
-                    ok = post_cache_record(record)
+                    if get_local_cache is not None:
+                        entry = CacheEntry(
+                            track_id=job.track_id,
+                            label=out["label"],
+                            bbox=job.bbox,
+                            confidence=float(out["confidence"]),
+                            timestamp=job.frame_id,
+                        ).model_dump()
+                        ok = get_local_cache.put(entry)
+                    else: 
+                        ok = post_cache_record(record)
                 if ok: self.cache_ok += 1
                 else: self.cache_fail += 1
 
