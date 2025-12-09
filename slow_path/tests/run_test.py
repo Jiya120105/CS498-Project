@@ -53,14 +53,15 @@ def main():
             # Many policies accept a hint; if not used in your code, ignore
             payload["force"] = True
         try:
-            r = requests.post(tick_url, json=payload, timeout=2.5)
+            r = requests.post(tick_url, json=payload, timeout=5)
             js = r.json()
-            enq += js.get("count", 0)
-            sent += 1
+            if js.get("accepted"):
+                sent += 1
             if k % args.fps == 0:
-                print(f"[t={k/args.fps:>4.1f}s] enqueued this second: {js.get('count', 0)} (total enq={enq})")
+                print(f"[t={k/args.fps:>4.1f}s] tick accepted (total sent={sent})")
         except Exception as e:
             print("tick error:", e)
+            
         # maintain cadence
         elapsed = time.time() - (t0 + k*period)
         sleep = period - elapsed
@@ -72,22 +73,45 @@ def main():
         m = requests.get(metrics_url, timeout=3).json()
         print("=== METRICS SUMMARY ===")
         w = m.get("worker", {})
+        c = m.get("cache", {})
+        trig = m.get("trigger", {})
         print("queue_depth:", w.get("queue_depth"))
         print("results_size:", w.get("results_size"))
         print("infer_latency_ms:", w.get("infer_latency_ms"))
-        print("cache_posts", w.get("cache_posts"))
-        if "batching" in m:
-            print("batching:", m["batching"])
-        if "jobs" in m:
-            print("jobs:", m["jobs"])
-        if "trigger" in m:
-            print("trigger:", m["trigger"])
-        if "parsing" in m:
-            print("parsing:", m["parsing"])
-        if "cache_posts" in m:
-            print("cache_posts:", m["cache_posts"])
+        # new worker-level fields
+        print("jobs_enqueued_total:", w.get("jobs_enqueued_total"))
+        print("jobs_success:", w.get("jobs_success"))
+        print("jobs_error:", w.get("jobs_error"))
+        print("throughput_jobs_per_sec:", w.get("throughput_jobs_per_sec"))
+
+        # cache summary (moved to top-level 'cache')
+        if c:
+            print("cache_ok:", c.get("ok"), "cache_fail:", c.get("fail"), "hit_ratio:", c.get("hit_ratio"))
+        else:
+            # backwards compatibility: older metric name
+            cp = w.get("cache_posts") or m.get("cache_posts")
+            if cp:
+                print("cache_posts:", cp)
+
+        # trigger
+        print("trigger:", trig)
+
+        # optional model output stats
+        model_out = m.get("model_output", {})
+        if model_out:
+            print("model_output keys:", list(model_out.keys()))
+
     except Exception as e:
         print("metrics error:", e)
 
 if __name__ == "__main__":
     main()
+
+
+# python image_sequence_driver.py --root MOT17-01-DPM/img1 \
+#   --pattern "*.jpg" \
+#   --base http://127.0.0.1:8008 \
+#   --fps 15 \
+#   --resize 640x360 \
+#   --max-rois 3 \
+#   --fallback-grid

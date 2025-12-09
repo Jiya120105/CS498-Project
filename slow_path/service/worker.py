@@ -6,21 +6,19 @@ import io, base64
 
 from .models.loader import load_model
 from .schema import CacheRecord
+from semantic_cache.semantic_cache import CacheEntry, SemanticCache
 from .client import post_cache_record
 from .timing import TimerStats
 
 
-# Optional in-process semantic cache integration. If the environment
-# variable USE_LOCAL_SEMANTIC_CACHE is set to "1", the worker will
+# If the environment variable USE_LOCAL_SEMANTIC_CACHE is set to "1", the worker will
 # store results in a local SemanticCache instance instead of posting to
-# the external cache HTTP endpoint. This is useful for testing or
-# single-process deployments where `semantic_cache.SemanticCache` should
-# be the authoritative store.
+# the external testing cache HTTP endpoint. 
+
 _use_local_cache = os.getenv("USE_LOCAL_SEMANTIC_CACHE", "0") == "1"
 _local_cache = None
 if _use_local_cache:
     try:
-        from semantic_cache import CacheEntry, SemanticCache
         _local_cache = SemanticCache()
     except Exception:
         _local_cache = None
@@ -41,14 +39,22 @@ class Job:
     frame_id: int
     track_id: int
     bbox: list
-    image_b64: str
+    frame_rgb: list
     prompt: str
 
 class Worker:
     def __init__(self):
         self.queue: "asyncio.Queue[Job]" = asyncio.Queue()
         self.results: Dict[str, Dict[str, Any]] = {}
-        self.model = load_model("blip")
+        # Allow selecting the model via env var SLOWPATH_MODEL (mock/blip/blip2/llama)
+        model_name = os.getenv("SLOWPATH_MODEL", "llama")
+        try:
+            self.model = load_model(model_name)
+            print(f"[slowpath] loaded model: {model_name}")
+        except Exception as e:
+            # fallback to a mock model if chosen model fails to load
+            print(f"[slowpath] failed to load model '{model_name}': {e}; falling back to 'mock'")
+            self.model = load_model("mock")
         self.lat = TimerStats()
         self.infer_lat_ms = []     # last N samples
         self.cache_ok = 0
@@ -59,9 +65,15 @@ class Worker:
         while True:
             job = await self.queue.get()
             try:
-                img = Image.open(io.BytesIO(base64.b64decode(job.image_b64))).convert("RGB")
+                x, y, w, h = job.bbox
+                crop = job.frame_rgb[y:y+h, x:x+w]
+                img = Image.fromarray(crop)
+                buf = io.BytesIO()
+                img.save(buf, format="JPEG")
+                crop_b64 = base64.b64encode(buf.getvalue()).decode()
+
                 start = time.perf_counter()
-                out = self.model.infer(img, job.prompt)
+                out = self.model.infer(crop_b64, job.prompt)
                 infer_ms = (time.perf_counter()-start)*1000
                 self.lat.observe_ms(infer_ms)
                 if len(self.lat.samples)%10==0:
@@ -80,9 +92,10 @@ class Worker:
                     ttl=5,
                     metadata=out.get("metadata", {})
                 ).model_dump()
+
                 # If a local semantic cache is configured, put the entry there
                 # and treat that as a successful post. Otherwise call the
-                # external cache HTTP endpoint.
+                # external testing cache HTTP endpoint.
                 ok = False
                 if _local_cache is not None:
                     try:
@@ -92,7 +105,17 @@ class Worker:
                     except Exception:
                         ok = False
                 else:
-                    ok = post_cache_record(record)
+                    if get_local_cache is not None:
+                        entry = CacheEntry(
+                            track_id=job.track_id,
+                            label=out["label"],
+                            bbox=job.bbox,
+                            confidence=float(out["confidence"]),
+                            timestamp=job.frame_id,
+                        ).model_dump()
+                        ok = get_local_cache.put(entry)
+                    else: 
+                        ok = post_cache_record(record)
                 if ok: self.cache_ok += 1
                 else: self.cache_fail += 1
 

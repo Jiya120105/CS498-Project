@@ -1,37 +1,31 @@
 # BASIC TEST WITH REAL IMAGE
+import time, requests, base64, io
 from PIL import Image
-import io, base64, requests, time
 
-# 1) Load your actual image
-img = Image.open("game1.webp").convert("RGB")
-
-# (optional) if the image is huge, shrink to speed up VLM
+img = Image.open("slow_path/tests/000004.jpg").convert("RGB")
 img.thumbnail((640, 640))
-
-# 2) Encode to base64
 buf = io.BytesIO(); img.save(buf, format="JPEG")
 b64 = base64.b64encode(buf.getvalue()).decode()
 
-# 3) POST /infer (whole image as the ROI)
-r = requests.post("http://127.0.0.1:8008/infer", json={
-    "frame_id": 1,
-    "track_id": 101,
-    "bbox": [0, 0, img.width, img.height],
-    "image_b64": b64
-})
-job_id = r.json()["job_id"]
-print("Job ID:", job_id)
+t0 = time.perf_counter()
 
-# 4) Poll /result
-for i in range(20):
-    out = requests.get("http://127.0.0.1:8008/result", params={"job_id": job_id}).json()
+r = requests.post("http://127.0.0.1:8008/infer",
+                  json={"frame_id":1,"track_id":101,"bbox":[0,0,img.width,img.height],"image_b64":b64},
+                  timeout=(2, 60))
+job_id = r.json()["job_id"]
+
+out = None
+while True:
+    out = requests.get("http://127.0.0.1:8008/result",
+                       params={"job_id": job_id},
+                       timeout=(2, 20)).json()
     if out["status"] != "pending":
         break
     time.sleep(0.5)
-    print(i)
 
-print(out)  # expect {'status':'done','record':{...}}
-
+t1 = time.perf_counter()
+print(f"Wall time (submit → done): {(t1 - t0)*1000:.1f} ms")
+print(out)
 
 
 # TEST TRIGGER - CHANGE COOLDOWN OR GAP
