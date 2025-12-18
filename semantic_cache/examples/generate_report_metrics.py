@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-"""Generate comprehensive metrics and visualizations for CS498 final report.
-
-This script runs multiple simulations and generates publication-ready
+"""
+This script runs multiple simulations and generates
 figures and tables showing semantic cache performance.
 """
 
