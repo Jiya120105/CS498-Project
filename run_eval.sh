@@ -10,35 +10,34 @@ NC='\033[0m' # No Color
 echo -e "${GREEN}CS498 Project - Evaluation Runner${NC}"
 echo "=========================================="
 
-# Check if cache stub is running
-if ! curl -s http://127.0.0.1:8010/cache/stats > /dev/null 2>&1; then
-    echo -e "${YELLOW}Warning: Cache stub server not detected on port 8010${NC}"
-    echo -e "${YELLOW}Starting cache stub in background...${NC}"
-    cd slow_path
-    python cache_stub.py &
-    CACHE_PID=$!
-    cd ..
-    sleep 2
-    echo -e "${GREEN}Cache stub started (PID: $CACHE_PID)${NC}"
-    echo -e "${YELLOW}Note: You may need to kill it manually: kill $CACHE_PID${NC}"
-else
-    echo -e "${GREEN}Cache stub server detected and running${NC}"
-fi
-
 # Parse arguments
 SEQUENCE="${1:-}"
 DATA_ROOT="${2:-data}"
 OUTPUT_DIR="${3:-results}"
+TEST_MODE="${4:-}"
 
 # Enable shared semantic cache for proper coordination between worker and hybrid processor
 export USE_LOCAL_SEMANTIC_CACHE=1
 
+# For test mode, use mock models
+if [ "$TEST_MODE" = "--test" ] || [ "$TEST_MODE" = "test" ]; then
+    export SLOWPATH_MODEL=mock
+    echo -e "${YELLOW}Test mode: Using mock models${NC}"
+    TEST_FLAG="--test"
+else
+    TEST_FLAG=""
+fi
+
+# Note: The slow path service uses ServiceClient which works in-process
+# No need to start a separate server for evaluation
+echo -e "${GREEN}Using in-process slow path service${NC}"
+
 if [ -z "$SEQUENCE" ]; then
     echo -e "${GREEN}Running evaluation on all sequences...${NC}"
-    python -m evaluation.evaluate --data_root "$DATA_ROOT" --output_dir "$OUTPUT_DIR"
+    python -m evaluation.evaluate --data_root "$DATA_ROOT" --output_dir "$OUTPUT_DIR" $TEST_FLAG
 else
     echo -e "${GREEN}Running evaluation on sequence: $SEQUENCE${NC}"
-    python -m evaluation.evaluate --sequence "$SEQUENCE" --data_root "$DATA_ROOT" --output_dir "$OUTPUT_DIR"
+    python -m evaluation.evaluate --sequence "$SEQUENCE" --data_root "$DATA_ROOT" --output_dir "$OUTPUT_DIR" $TEST_FLAG
 fi
 
 echo -e "${GREEN}Evaluation complete!${NC}"

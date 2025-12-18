@@ -44,7 +44,9 @@ def evaluate_processor(dataset: MOTDataset, processor, processor_name: str) -> D
 
 def evaluate_single_sequence(data_root: str, sequence: str, split: str = "train",
                             output_dir: str = "results",
-                            methods: Optional[list] = None):
+                            methods: Optional[list] = None,
+                            test_mode: bool = False,
+                            max_frames: Optional[int] = None):
     """
     Evaluate a single sequence
     
@@ -54,7 +56,16 @@ def evaluate_single_sequence(data_root: str, sequence: str, split: str = "train"
         split: "train" or "test"
         output_dir: Output directory for results
         methods: List of methods to evaluate: ['fast', 'slow', 'hybrid'] or None for all
+        test_mode: If True, use mock models and limit processing
+        max_frames: Maximum number of frames to process (None for all)
     """
+    if test_mode:
+        # Set mock mode for slow path
+        os.environ['SLOWPATH_MODEL'] = 'mock'
+        print("TEST MODE: Using mock models, limiting frame processing")
+        if max_frames is None:
+            max_frames = 10  # Default to 10 frames in test mode
+    
     print(f"Loading sequence: {sequence}")
     dataset = MOTDataset(data_root, sequence, split)
     
@@ -63,7 +74,21 @@ def evaluate_single_sequence(data_root: str, sequence: str, split: str = "train"
         return None
     
     print(f"Sequence info: {dataset.seq_info}")
-    print(f"Frames: {dataset.get_num_frames()}, FPS: {dataset.get_frame_rate()}")
+    total_frames = dataset.get_num_frames()
+    print(f"Frames: {total_frames}, FPS: {dataset.get_frame_rate()}")
+    
+    if max_frames and max_frames < total_frames:
+        print(f"Limiting processing to first {max_frames} frames (test mode)")
+        # Limit dataset to first N frames
+        all_frames = sorted(dataset.gt_data.keys()) if dataset.gt_data else []
+        if all_frames:
+            limited_frames = all_frames[:max_frames]
+            # Create a limited dataset view
+            limited_gt = {f: dataset.gt_data[f] for f in limited_frames if f in dataset.gt_data}
+            dataset.gt_data = limited_gt
+            if dataset.det_data:
+                limited_det = {f: dataset.det_data[f] for f in limited_frames if f in dataset.det_data}
+                dataset.det_data = limited_det
     
     os.makedirs(output_dir, exist_ok=True)
     
@@ -120,7 +145,9 @@ def evaluate_single_sequence(data_root: str, sequence: str, split: str = "train"
 
 def evaluate_all_sequences(data_root: str, split: str = "train",
                            output_dir: str = "results",
-                           methods: Optional[list] = None):
+                           methods: Optional[list] = None,
+                           test_mode: bool = False,
+                           max_frames: Optional[int] = None):
     """Evaluate all sequences in the dataset"""
     # Get all sequences
     temp_dataset = MOTDataset(data_root, "MOT16-02", split)
@@ -136,7 +163,7 @@ def evaluate_all_sequences(data_root: str, split: str = "train",
         print(f"{'='*60}")
         
         try:
-            results = evaluate_single_sequence(data_root, sequence, split, output_dir, methods)
+            results = evaluate_single_sequence(data_root, sequence, split, output_dir, methods, test_mode, max_frames)
             if results:
                 all_results[sequence] = results
         except Exception as e:
@@ -197,13 +224,17 @@ def main():
                        choices=['fast', 'hybrid', 'hybrid_blocking'],
                        default=None,
                        help="Methods to evaluate (default: fast, hybrid)")
+    parser.add_argument("--test", action="store_true",
+                       help="Test mode: use mock models and limit to 10 frames (no downloads)")
+    parser.add_argument("--max_frames", type=int, default=None,
+                       help="Maximum number of frames to process (useful for testing)")
     
     args = parser.parse_args()
     
     if args.sequence:
-        evaluate_single_sequence(args.data_root, args.sequence, args.split, args.output_dir, args.methods)
+        evaluate_single_sequence(args.data_root, args.sequence, args.split, args.output_dir, args.methods, args.test, args.max_frames)
     else:
-        evaluate_all_sequences(args.data_root, args.split, args.output_dir, args.methods)
+        evaluate_all_sequences(args.data_root, args.split, args.output_dir, args.methods, args.test, args.max_frames)
 
 
 if __name__ == "__main__":
