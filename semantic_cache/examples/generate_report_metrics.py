@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Generate comprehensive metrics and visualizations for CS498 final report.
+"""Generate comprehensive metrics and visualizations used in the final report.
 
-This script runs multiple simulations and generates publication-ready
+This script runs multiple simulations and generates
 figures and tables showing semantic cache performance.
 """
 
@@ -18,7 +18,7 @@ def run_comprehensive_benchmarks():
     """Run multiple benchmark scenarios and collect results."""
 
     print("="*70)
-    print("CS498 SEMANTIC CACHE - COMPREHENSIVE PERFORMANCE REPORT")
+    print("SEMANTIC CACHE - PERFORMANCE REPORT")
     print("="*70)
     print()
 
