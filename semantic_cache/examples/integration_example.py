@@ -1,7 +1,7 @@
 """Integration example demonstrating fast/slow path with SemanticCache.
 
 Shows how semantic cache enables real-time video processing by caching
-VLM outputs across frames, reducing expensive inference calls by >90%.
+VLM outputs across frames, reducing expensive inference calls.
 """
 import random
 import time
@@ -35,7 +35,7 @@ def simulate_video_pipeline(total_frames: int = 150):
         frame_hits = 0
         frame_misses = 0
         
-        # ========== FAST PATH (EVERY FRAME) ==========
+        # FAST PATH (EVERY FRAME) 
         # Query cache for all tracked objects
         for track_id in active_track_ids:
             entry = cache.get(track_id, frame)
@@ -58,7 +58,7 @@ def simulate_video_pipeline(total_frames: int = 150):
         else:
             frame_patterns.append("P")  # Partial hit
         
-        # ========== SLOW PATH (EVERY 15 FRAMES) ==========
+        # SLOW PATH (EVERY 15 FRAMES) 
         if frame % VLM_INTERVAL == 0:
             vlm_runs += 1
             print(f"\nFrame {frame}: VLM Running VLM inference...")
@@ -78,7 +78,7 @@ def simulate_video_pipeline(total_frames: int = 150):
             
             print(f"   Updated {len(active_track_ids)} tracks in cache")
         
-        # ========== PERIODIC STATS (EVERY SECOND @ 30FPS) ==========
+        #  PERIODIC STATS (EVERY SECOND @ 30FPS) 
         if frame > 0 and frame % 30 == 0:
             stats = cache.get_stats()
             print(f"\n--- Frame {frame} Stats ---")
@@ -89,7 +89,6 @@ def simulate_video_pipeline(total_frames: int = 150):
         # Simulate real-time processing
         time.sleep(0.001)
     
-    # ========== FINAL SUMMARY ==========
     print("\n" + "=" * 60)
     print("SIMULATION COMPLETE - Summary")
     print("=" * 60)
