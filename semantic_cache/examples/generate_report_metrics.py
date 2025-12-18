@@ -325,4 +325,4 @@ def generate_latex_tables(results):
 
 if __name__ == "__main__":
     results = run_comprehensive_benchmarks()
-    print("\nYou can now use these files in your final report!")
+    print("\nFiles are ready!")
