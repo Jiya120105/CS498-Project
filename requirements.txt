@@ -2,7 +2,6 @@ numpy>=1.21.0,<2.0
 opencv-python>=4.5.0
 matplotlib>=3.5.0
 uvicorn[standard]
-opencv-python
 pydantic>=2
 fastapi
 Pillow
@@ -10,6 +9,6 @@ requests
 torch
 transformers
 torchvision
-accelerate 
+accelerate
 bitsandbytes
 httpx

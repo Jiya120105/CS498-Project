@@ -4,6 +4,9 @@ Run this file directly with Python 3: python test_semantic_cache.py
 """
 import threading
 import time
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
 from semantic_cache import SemanticCache, CacheEntry
 
 

@@ -14,8 +14,8 @@ venv/
 dist/
 build/
 
-# Generated figures
-*.png
+# Temporary CSV files (but keep results)
 *.csv
 
+# MOT dataset (large files)
 /MOT17-01-DPM

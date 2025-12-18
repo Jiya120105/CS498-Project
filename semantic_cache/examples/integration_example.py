@@ -5,6 +5,9 @@ VLM outputs across frames, reducing expensive inference calls by >90%.
 """
 import random
 import time
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
 from semantic_cache import SemanticCache, CacheEntry
 
 
@@ -58,7 +61,7 @@ def simulate_video_pipeline(total_frames: int = 150):
         # ========== SLOW PATH (EVERY 15 FRAMES) ==========
         if frame % VLM_INTERVAL == 0:
             vlm_runs += 1
-            print(f"\nFrame {frame}: 🤖 Running VLM inference...")
+            print(f"\nFrame {frame}: VLM Running VLM inference...")
             
             # VLM generates labels for ALL visible tracks
             labels = ["person", "car", "bicycle", "dog", "truck"]
@@ -73,7 +76,7 @@ def simulate_video_pipeline(total_frames: int = 150):
                 )
                 cache.put(entry)
             
-            print(f"  ✓ Updated {len(active_track_ids)} tracks in cache")
+            print(f"   Updated {len(active_track_ids)} tracks in cache")
         
         # ========== PERIODIC STATS (EVERY SECOND @ 30FPS) ==========
         if frame > 0 and frame % 30 == 0:
@@ -111,3 +114,4 @@ def simulate_video_pipeline(total_frames: int = 150):
 
 
 if __name__ == "__main__":
+    simulate_video_pipeline()

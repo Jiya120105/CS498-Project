@@ -1,13 +1,16 @@
 import argparse
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent))
 from cache_simulation import simulate_cache
 import matplotlib.pyplot as plt
 import numpy as np
 
 def visualize_cache(cache_stats, no_cache_stats, save_path="cache_performance.png"):
-    plt.figure(figsize=(15, 10))
+    plt.figure(figsize=(15, 5))
 
     # Plot 1: Processing Times Comparison
-    plt.subplot(2, 2, 1)
+    plt.subplot(1, 3, 1)
     frames = cache_stats["frame"]
     plt.plot(frames, cache_stats["total_processing_time"], label="With Cache")
     plt.plot(frames, no_cache_stats["total_processing_time"], label="Without Cache")
@@ -17,7 +20,7 @@ def visualize_cache(cache_stats, no_cache_stats, save_path="cache_performance.pn
     plt.legend()
 
     # Plot 2: Cache Performance
-    plt.subplot(2, 2, 2)
+    plt.subplot(1, 3, 2)
     frames = cache_stats["frame"]
     # Use cumulative real track hits/misses (more accurate for real tracks only)
     if "cumulative_real_hits" in cache_stats and "cumulative_real_misses" in cache_stats:
@@ -55,23 +58,13 @@ def visualize_cache(cache_stats, no_cache_stats, save_path="cache_performance.pn
     ax.legend(lines + lines2, labels_ + labels2, loc="upper left")
 
     # Plot 3: Time Saved by Cache
-    plt.subplot(2, 2, 3)
+    plt.subplot(1, 3, 3)
     cumulative_benefit = np.cumsum(cache_stats["cache_benefit"])
     plt.plot(frames, cumulative_benefit, label="Cumulative Time Saved")
     plt.xlabel("Frame")
     plt.ylabel("Time Saved (s)")
     plt.title("Cumulative Time Saved by Cache")
     plt.legend()
-
-    # Plot 4: Path Time Distributions
-    plt.subplot(2, 2, 4)
-    plt.boxplot([
-        cache_stats["fast_path_time"],
-        cache_stats["slow_path_time"],
-        no_cache_stats["slow_path_time"]
-    ], tick_labels=["Fast Path", "Slow Path\n(with cache)", "Slow Path\n(no cache)"])
-    plt.ylabel("Time (s)")
-    plt.title("Processing Time Distribution")
 
     plt.tight_layout()
 
@@ -128,8 +121,10 @@ if __name__ == "__main__":
     parser.add_argument("--save_path", type=str, default=None, help="Path to save the visualization.")
 
     args = parser.parse_args()
-    # Default to saving in semantic_cache folder
+    # Default to saving in semantic_cache/results folder
     if args.save_path is None:
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        args.save_path = os.path.join(script_dir, "cache_performance.png")
+        script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        results_dir = os.path.join(script_dir, "results")
+        os.makedirs(results_dir, exist_ok=True)
+        args.save_path = os.path.join(results_dir, "cache_performance.png")
     main(frames=args.frames, mode=args.mode, save_path=args.save_path)
