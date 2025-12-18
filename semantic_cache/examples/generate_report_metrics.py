@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""Generate comprehensive metrics and visualizations used in the final report.
-
+"""
 This script runs multiple simulations and generates
 figures and tables showing semantic cache performance.
 """

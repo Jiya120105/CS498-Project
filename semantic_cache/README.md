@@ -193,7 +193,6 @@ python3 -m semantic_cache.tests.test_semantic_cache
 ## Documentation
 
 - **API Reference**: This README
-- **Design & Implementation**: [docs/DESIGN_AND_IMPLEMENTATION.md](docs/DESIGN_AND_IMPLEMENTATION.md)
 - **Examples**: See [examples/](examples/) directory
 - **Tests**: See [tests/](tests/) directory
 
