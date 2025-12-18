@@ -1,7 +1,6 @@
 """Public exports for the slow_path.service package.
 
-Expose a small, stable API so other modules can import the slow-path
-service without reaching into implementation details.
+A stable API so other modules can import the slow-path service
 
 Public symbols:
  - ServiceClient: synchronous in-process client (uses TestClient)

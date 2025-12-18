@@ -13,7 +13,7 @@ from .timing import TimerStats
 
 # If the environment variable USE_LOCAL_SEMANTIC_CACHE is set to "1", the worker will
 # store results in a local SemanticCache instance instead of posting to
-# the external testing cache HTTP endpoint. 
+# the external stub cache HTTP endpoint. 
 
 _use_local_cache = os.getenv("USE_LOCAL_SEMANTIC_CACHE", "0") == "1"
 _local_cache = None
@@ -83,27 +83,13 @@ class Worker:
                 if len(self.infer_lat_ms) > 200:  # keep a short window
                     self.infer_lat_ms.pop(0)
 
-                record = CacheRecord(
-                    track_id=job.track_id,
-                    label=out["label"],
-                    bbox=job.bbox,
-                    confidence=float(out["confidence"]),
-                    timestamp=job.frame_id,
-                    ttl=5,
-                    metadata=out.get("metadata", {})
-                ).model_dump()
-
                 # If a local semantic cache is configured, put the entry there
-                # and treat that as a successful post. Otherwise call the
-                # external testing cache HTTP endpoint.
+                # Otherwise call the external testing cache HTTP endpoint.
                 ok = False
                 if _local_cache is not None:
-                    try:
-                        ce = CacheEntry.from_vlm_output(job.track_id, out, job.bbox, job.frame_id)
-                        _local_cache.put(ce)
-                        ok = True
-                    except Exception:
-                        ok = False
+                    ce = CacheEntry.from_vlm_output(job.track_id, out, job.bbox, job.frame_id)
+                    _local_cache.put(ce)
+                    ok = _local_cache.put(ce)
                 else:
                     if get_local_cache is not None:
                         entry = CacheEntry(
@@ -115,6 +101,15 @@ class Worker:
                         ).model_dump()
                         ok = get_local_cache.put(entry)
                     else: 
+                        record = CacheRecord(
+                            track_id=job.track_id,
+                            label=out["label"],
+                            bbox=job.bbox,
+                            confidence=float(out["confidence"]),
+                            timestamp=job.frame_id,
+                            ttl=5,
+                            metadata=out.get("metadata", {})
+                        ).model_dump()
                         ok = post_cache_record(record)
                 if ok: self.cache_ok += 1
                 else: self.cache_fail += 1

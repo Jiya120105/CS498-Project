@@ -54,7 +54,7 @@ def collect_metrics(url: str, secs: int) -> List[Dict[str, Any]]:
             "trigger_changed_scene": trigger.get("changed_scene"),
             "trigger_expired_total": trigger.get("expired_total"),
             "trigger_periodic": trigger.get("periodic"),
-            # optional model output (kept as JSON string to avoid dynamic columns)
+            # confidence stats
             "confidence_stats_per_label": json.dumps(
                 (m.get("model_output") or {}).get("confidence_stats_per_label", {}),
                 separators=(",", ":")
@@ -80,7 +80,7 @@ CSV_HEADER = [
     # trigger
     "trigger_seen", "trigger_enqueued", "trigger_enqueue_rate",
     "trigger_changed_scene", "trigger_expired_total", "trigger_periodic",
-    # optional
+    # confidence stats
     "confidence_stats_per_label",
 ]
 

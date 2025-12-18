@@ -1,27 +1,114 @@
-# CS498-Project
+# CS498-Project Slowpath
 
-## API Documentation for Slow Path
+## Compile & Run (Detailed instructions)
+
+### 1) Environment & dependencies
+
+- Create a virtual environment (recommended):
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
+
+- The repository includes a top-level `requirements.txt`. If you need GPU-enabled packages, install them according to your platform and CUDA version.
+
+### 2) Optional: run the cache stub (local HTTP cache)
+
+```bash
+# runs a lightweight HTTP endpoint to receive cache PUTs
+python slow_path/cache_stub.py
+```
+
+Default stub: `http://127.0.0.1:8010`.
+
+### 3) Run the slow-path server (HTTP / HTTPS)
+
+The slow-path service is a FastAPI app. Typical development run uses `uvicorn`:
+
+```bash
+# run locally (HTTP)
+USE_LOCAL_SEMANTIC_CACHE=1 SLOWPATH_MODEL=llama uvicorn slow_path.service.api:app --host 127.0.0.1 --port 8008 --reload
+
+# with external cache stub
+CACHE_BASE_URL=http://127.0.0.1:8010 SLOWPATH_MODEL=blip uvicorn slow_path.service.api:app --host 127.0.0.1 --port 8008
+```
+
+### 4) Quick verification
+
+```bash
+curl -sS http://127.0.0.1:8008/health
+# expected: {"ok": true}
+```
+
+## HTTPS API Overview (endpoints summary)
+
+### GET /health
+- Simple liveness check. Response: `{ "ok": true }`
 
 ### POST /infer
-Body: { frame_id:int, track_id:int, bbox:[x,y,w,h], image_b64:str }
-Resp: { job_id:str }
+- Purpose: enqueue a single inference job for one ROI.
+- Request JSON:
+
+```json
+{
+  "frame_id": 123,
+  "track_id": 5,
+  "bbox": [x,y,w,h],
+  "image_b64": "<base64-encoded RGB image>",
+  "prompt_hint": "optional prompt"
+}
+```
+
+  - Response JSON: `{ "job_id": "<uuid>" }`
+
 
 ### GET /result?job_id=...
-Resp: { status:"pending"|"done"|"error", record?:CacheRecord }
+- Purpose: fetch status/result for an enqueued job.
+- Response: `{ status:"pending"|"done"|"error", record?:CacheRecord }`
 
 ### POST /trigger/tick
-Body: { frame_id:int, image_b64:str, rois:[{track_id:int,bbox:[x,y,w,h]}], prompt_hint?:str }
-Resp: { enqueued:[{track_id:int,job_id:str}], count:int }
+- Purpose: non-blocking tick used by tracking pipelines. The server decides which ROIs to enqueue based on trigger policy.
+  - Request JSON:
 
-### POST /cache/put 
-Body: CacheRecord
-Resp: { ok: true }
+```json
+{
+  "frame_id": 123,
+  "image_b64": "<base64 full-frame>",
+  "rois": [{ "track_id": 5, "bbox": [x,y,w,h] }, ...],
+  "prompt_hint": "optional"
+}
+```
+
+  - Response: `{ enqueued:[{track_id:int,job_id:str}], count:int }` 
 
 ### GET /config/get  |  POST /config/set
-Tune TriggerConfig at runtime
+- Purpose: read/update the runtime trigger configuration.
+- `POST /config/set` accepts a JSON with fields `every_N`, `diff_thresh`, `min_gap`, `cooldown`, `ttl_frames`.
 
 ### GET /metrics
-Queue depth, latency percentiles, cache post counts, total enqueued jobs
+- Purpose: return worker / trigger / cache statistics (latency percentiles, queue depth, counts).
+
+## Programmatic / In-process API
+
+The module exposes a small programmatic surface documented in slow_path/service/api.py:
+
+- `ServiceClient` — a synchronous, in-process client (wraps FastAPI TestClient). Useful for unit tests or embedding the service in-process.
+
+Example:
+
+```python
+from slow_path.service.api import ServiceClient
+svc = ServiceClient()
+res = svc.infer(frame_id=1, track_id=2, bbox=[0,0,32,32], image_b64=my_b64)
+job_id = res["job_id"]
+print(svc.result(job_id))
+svc.close()
+```
+
+- `enqueue_infer(...)` — async helper to push a job directly to the worker queue (useful from an asyncio context when the worker loop is running).
 
 ## Model configuration
 

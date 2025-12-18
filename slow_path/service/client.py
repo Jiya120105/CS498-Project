@@ -1,4 +1,4 @@
-import os, time, json, httpx
+import os, time, httpx
 CACHE_BASE = os.getenv("CACHE_BASE_URL", "http://127.0.0.1:8010")
 
 def post_cache_record(record: dict, timeout=2.0, retries=3) -> bool:

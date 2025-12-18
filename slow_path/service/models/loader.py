@@ -1,10 +1,10 @@
-import time, json, re, math, torch
+import time, torch
 from typing import Literal, Dict, Any
 from transformers import BlipProcessor, BlipForConditionalGeneration, Blip2Processor, Blip2ForConditionalGeneration
 from PIL import Image
-from ..json_utils import try_parse_json, coerce_to_schema, normalize_label, extract_categories
+from ..json_utils import extract_categories, json_extraction
 from ..categories import CATEGORIES
-from transformers import AutoModelForVision2Seq, AutoProcessor, MllamaForConditionalGeneration
+from transformers import AutoProcessor, MllamaForConditionalGeneration
 
 ModelName = Literal["mock", "blip", "blip2", "llama"]  # add "blip2", "minigpt4" later
 
@@ -98,8 +98,6 @@ class LlamaModel:
         inputs = {k: (v.to(self.device) if isinstance(v, torch.Tensor) else v)
                   for k, v in inputs.items()}
 
-        # With device_map="auto", DO NOT manually move inputs to a single device.
-        # Accelerate will dispatch correctly from CPU tensors.
         out = self.model.generate(
             **inputs,
             max_new_tokens=max_new_tokens,
@@ -108,39 +106,13 @@ class LlamaModel:
 
         # Decode whole sequence and strip everything before the assistant turn.
         decoded = self.processor.batch_decode(out, skip_special_tokens=True)[0]
+
         # Heuristic: split at the last assistant tag if present
         for tag in ["<|assistant|>", "assistant\n", "Assistant:"]:
             if tag in decoded:
                 decoded = decoded.split(tag)[-1].strip()
         
-        # --- Robust JSON extraction & normalization ---
-        # Grab the first JSON object in the string (handles any stray tokens)
-        m = re.search(r"\{.*\}", decoded, flags=re.DOTALL)
-        s = m.group(0) if m else decoded.strip()
-
-        try:
-            obj = json.loads(s)
-        except Exception:
-            # Fallback if the model didn't return valid JSON
-            obj = {"label": s[:64], "confidence": 0.0, "metadata": {"raw": s}}
-
-        # Normalize fields
-        label = str(obj.get("label", "")).strip()
-        conf = obj.get("confidence", 0.0)
-        try:
-            conf = float(conf)
-        except Exception:
-            conf = 0.0
-        # clamp to [0,1]
-        if math.isnan(conf) or math.isinf(conf):
-            conf = 0.0
-        conf = max(0.0, min(1.0, conf))
-
-        metadata = obj.get("metadata") or {}
-        if not isinstance(metadata, dict):
-            metadata = {"meta": str(metadata)}
-
-        return {"label": label, "confidence": conf, "metadata": metadata}
+        return json_extraction(decoded)
 
 def load_model(name: ModelName = "mock"):
     if name == "mock":

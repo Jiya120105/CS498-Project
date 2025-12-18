@@ -80,7 +80,7 @@ def metrics():
     cache_total = worker.cache_ok + worker.cache_fail
     cache_hit_ratio = (worker.cache_ok / cache_total) if cache_total else 0.0
 
-    # --- Optional: confidence stats per label ---
+    # --- Confidence stats per label ---
     confidences = defaultdict(list)
     for r in worker.results.values():
         if r.get("status")=="done":
@@ -215,20 +215,21 @@ async def process_tick(req: TickReq):
     return {"enqueued_track_ids": enqueued, "count": len(enqueued)}
 
 
-# -- Programmatic API (small surface) -------------------------------------
+# === Programmatic API (small surface) ===
 """
-The public, programmatic surface for other modules:
+The public surface for other modules:
 
-- ServiceClient: a lightweight synchronous client that runs the FastAPI app
-  in-process (uses TestClient). It triggers the app startup which will start
-  the background worker and exposes convenience methods: infer, trigger_tick,
-  result, metrics, health and close().
+- ServiceClient: 
+    a lightweight synchronous client that runs the FastAPI app
+    in-process (uses TestClient). It triggers the app startup which will start
+    the background worker and exposes convenience methods: infer, trigger_tick,
+    result, metrics, health and close().
 
-- enqueue_infer: async helper to enqueue a Job directly onto the worker
-  queue (useful when calling from an async context within the same process).
+- enqueue_infer: 
+    async helper to enqueue a Job directly onto the worker
+    queue (useful when calling from an async context within the same process).
 
-These keep other modules free from HTTP wiring while reusing the same
-application/worker implementation used by the server.
+Keeping other modules free from HTTP wiring
 """
 
 from fastapi.testclient import TestClient
@@ -289,10 +290,10 @@ class ServiceClient:
 async def enqueue_infer(frame_id: int, track_id: int, bbox: list[int], image_b64: str, prompt_hint: str | None = None) -> str:
     """Enqueue a job directly on the worker queue. Returns job_id.
 
-    This is an async helper intended for use inside an existing asyncio
-    context/process. It does not start the worker loop; ensure the worker
-    is running (for example by creating a ServiceClient which runs startup
-    handlers) before relying on background processing.
+    Async helper intended for use inside an existing asyncio context/process. 
+    It does not start the worker loop; ensure the worker is running 
+    (for example by creating a ServiceClient which runs startup handlers) 
+    before relying on background processing.
     """
     job_id = str(uuid.uuid4())
     prompt = prompt_hint or 'Return JSON: {"label": "<category>", "confidence": <0..1>, "metadata": {...}}'

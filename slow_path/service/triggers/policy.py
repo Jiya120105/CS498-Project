@@ -4,17 +4,16 @@ from typing import Dict, Tuple
 
 @dataclass
 class TriggerConfig:
-    every_N: int = 10            # run slow-path every 15 frames
+    every_N: int = 10            # run slow-path every 10 frames
     diff_thresh: float = 8.0     # mean abs-diff threshold (0..255)
     min_gap: int = 2             # at least 5 frames between triggers per track
     cooldown: int = 1            # avoid re-triggering immediately after a diff trigger
-    ttl_frames: int = 14         # explicit semantic TTL in frames
+    ttl_frames: int = 15         # explicit semantic TTL in frames
 
 class TriggerPolicy:
     def __init__(self, cfg: TriggerConfig = TriggerConfig()):
         self.cfg = cfg
-        # per-track book-keeping: track_id -> (last_frame, last_trigger_frame)
-        self.state: Dict[int, Tuple[int, int]] = {}
+        self.state: Dict[int, Tuple[int, int]] = {} # track_id -> (last_frame, last_trigger_frame)
 
     def _roi_gray(self, frame_rgb: np.ndarray, bbox):
         x,y,w,h = bbox
