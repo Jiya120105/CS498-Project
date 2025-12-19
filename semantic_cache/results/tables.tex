@@ -1,0 +1,51 @@
+% Table 1: Latency Comparison
+\begin{table}[h]
+\centering
+\caption{Per-Frame Latency Comparison (200 frames)}
+\label{tab:latency}
+\begin{tabular}{lrrr}
+\hline
+\textbf{Metric} & \textbf{With Cache (ms)} & \textbf{Without Cache (ms)} & \textbf{Speedup} \\
+\hline
+Mean  & 31.00 & 555.00 & 17.90$\times$ \\
+p50   & 10.00 & 610.00 & 61.00$\times$ \\
+p95   & 210.00 & 610.00 & 2.90$\times$ \\
+p99   & 610.00 & 610.00 & 1.00$\times$ \\
+\hline
+\end{tabular}
+\end{table}
+
+% Table 2: Cache Effectiveness Metrics
+\begin{table}[h]
+\centering
+\caption{Semantic Cache Performance Metrics}
+\label{tab:cache-metrics}
+\begin{tabular}{lr}
+\hline
+\textbf{Metric} & \textbf{Value} \\
+\hline
+Hit Rate & 49.1\% \\
+Total Hits & 261 \\
+Total Misses & 471 \\
+Max Cache Size & 3 entries \\
+Total Time Saved & 102.20s \\
+\hline
+\end{tabular}
+\end{table}
+
+% Table 3: Scalability Results
+\begin{table}[h]
+\centering
+\caption{Scalability Analysis}
+\label{tab:scalability}
+\begin{tabular}{rrrr}
+\hline
+\textbf{Frames} & \textbf{Speedup} & \textbf{Hit Rate} & \textbf{Cache Size} \\
+\hline
+50 & 16.41$\times$ & 59.0\% & 3 \\
+100 & 17.63$\times$ & 48.5\% & 3 \\
+200 & 18.47$\times$ & 49.0\% & 3 \\
+300 & 18.31$\times$ & 48.5\% & 3 \\
+\hline
+\end{tabular}
+\end{table}

@@ -1,0 +1,68 @@
+{
+  "scalability": [
+    {
+      "frames": 50,
+      "cache_time_ms": 34.00000000000001,
+      "no_cache_time_ms": 558.0000000000001,
+      "speedup": 16.41176470588235,
+      "hit_rate": 0.5899280575539568,
+      "max_cache_size": 3
+    },
+    {
+      "frames": 100,
+      "cache_time_ms": 31.999999999999993,
+      "no_cache_time_ms": 564.0000000000001,
+      "speedup": 17.625000000000007,
+      "hit_rate": 0.4849624060150376,
+      "max_cache_size": 3
+    },
+    {
+      "frames": 200,
+      "cache_time_ms": 30.0,
+      "no_cache_time_ms": 554.0000000000001,
+      "speedup": 18.466666666666672,
+      "hit_rate": 0.4896421845574388,
+      "max_cache_size": 3
+    },
+    {
+      "frames": 300,
+      "cache_time_ms": 30.0,
+      "no_cache_time_ms": 549.3333333333335,
+      "speedup": 18.311111111111117,
+      "hit_rate": 0.4854368932038835,
+      "max_cache_size": 3
+    }
+  ],
+  "detailed": {
+    "frames": 200,
+    "cache": {
+      "mean_ms": 31.000000000000007,
+      "p50_ms": 10.0,
+      "p95_ms": 210.00000000000003,
+      "p99_ms": 610.0000000000001,
+      "max_ms": 610.0000000000001,
+      "min_ms": 10.0
+    },
+    "no_cache": {
+      "mean_ms": 555.0000000000001,
+      "p50_ms": 610.0000000000001,
+      "p95_ms": 610.0000000000001,
+      "p99_ms": 610.0000000000001,
+      "max_ms": 610.0000000000001,
+      "min_ms": 10.0
+    },
+    "speedup": {
+      "mean": 17.903225806451616,
+      "p50": 61.00000000000001,
+      "p95": 2.904761904761905,
+      "p99": 1.0
+    },
+    "cache_performance": {
+      "final_hit_rate": 0.4906015037593985,
+      "total_hits": 261,
+      "total_misses": 471,
+      "max_cache_size": 3,
+      "total_time_saved_s": 102.19999999999992
+    }
+  }
+}

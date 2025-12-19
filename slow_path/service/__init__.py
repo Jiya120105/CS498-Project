@@ -1,14 +1,15 @@
-"""Lightweight package initializer for slow_path.service.
+"""Public exports for the slow_path.service package.
 
-Avoid importing heavy modules (like the FastAPI app) at package import time,
-so that importing submodules (e.g., ``from slow_path.service.worker import Worker``)
-does not instantiate a global Worker or load a model inadvertently.
+A stable API so other modules can import the slow-path service
 
-If you need the HTTP service API (ServiceClient, enqueue_infer, etc.), import
-them directly from ``slow_path.service.api`` to trigger FastAPI and background
-worker initialization explicitly.
+Public symbols:
+ - ServiceClient: synchronous in-process client (uses TestClient)
+ - enqueue_infer: async helper to enqueue a Job directly
+ - trigger_tick: the ASGI endpoint and other helpers remain available via
+	 import from .api if deeper access is required.
 """
 
+from .api import ServiceClient, enqueue_infer, trigger_tick, trigger_tick as trigger_tick_endpoint
 from .worker import get_local_cache
 
-__all__ = ["get_local_cache"]
+__all__ = ["ServiceClient", "enqueue_infer", "trigger_tick", "trigger_tick_endpoint", "get_local_cache"]

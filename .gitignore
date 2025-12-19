@@ -14,9 +14,10 @@ venv/
 dist/
 build/
 
-# Generated figures
-*.png
+# Generated figures and CSVs
 *.csv
+slow_path/*.png
+slow_path/plots/*.png
 
 # Documentation files (project-specific)
 AGENTS.md
@@ -29,6 +30,8 @@ MOT17/
 football_dataset/
 mot16_dataset/
 football_video/
+
+# Video files
 *.mp4
 *.avi
 *.mov

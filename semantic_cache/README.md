@@ -7,24 +7,44 @@ Thread-safe cache for vision-language model (VLM) outputs in real-time video pro
 The semantic cache enables real-time streaming applications by amortizing VLM reasoning across frames:
 - **Fast path** (every frame): O(1) cache lookup for semantic labels
 - **Slow path** (every 15 frames): VLM inference to refresh cache
-- **Result**: 15-20× speedup vs. per-frame VLM inference
+- **Result**: 17.6× speedup vs. per-frame VLM inference
+
+## Quick Start
+
+```bash
+# Run unit tests
+python3 -m semantic_cache.tests.test_semantic_cache
+
+# Run integration demo (ideal case, 99.3% hit rate)
+python3 -m semantic_cache.examples.integration_example
+
+# Generate all report figures and metrics
+python3 -m semantic_cache.examples.generate_report_metrics
+
+# Quick performance visualization
+python3 -m semantic_cache.examples.visualize_cache_performance --frames 100 --mode measure
+```
 
 ## Core API
 
 ### CacheEntry
 ```python
-@dataclass
-class CacheEntry:
-    track_id: int       # ByteTrack ID
-    label: str          # Semantic label (e.g., "person", "car")
-    bbox: List[int]     # Bounding box [x, y, w, h]
-    confidence: float   # Confidence score [0, 1]
-    timestamp: int      # Frame number when created
+from semantic_cache import CacheEntry
+
+entry = CacheEntry(
+    track_id=42,            # ByteTrack ID
+    label="person",         # Semantic label
+    bbox=[100, 50, 80, 120], # Bounding box [x, y, w, h]
+    confidence=0.92,        # Confidence score [0, 1]
+    timestamp=100           # Frame number when created
+)
 ```
 
 ### SemanticCache
 ```python
-cache = SemanticCache(max_size=1000)
+from semantic_cache import SemanticCache
+
+cache = SemanticCache(max_size=1000, ttl_frames=15)
 
 # Query cache (fast path)
 entry = cache.get(track_id=42, current_frame=100)
@@ -46,6 +66,7 @@ stats = cache.get_stats()  # hits, misses, hit_rate, cache_size, evictions
 - **LRU eviction**: Oldest entries removed when capacity reached
 - **O(1) lookup**: Hash map keyed by `track_id`
 - **Batch operations**: Efficient multi-track queries
+- **Zero external dependencies**: Pure Python stdlib
 
 ## Performance
 
@@ -53,11 +74,86 @@ Based on simulations with 200 frames:
 
 | Metric | Value |
 |--------|-------|
-| **Mean speedup** | 18.45× |
+| **Mean speedup** | 17.6× |
 | **p50 speedup** | 61× |
 | **p50 latency** | 10ms |
-| **Hit rate** | 99.3% (ideal), 50% (realistic with tracking noise) |
+| **Hit rate** | 99.3% (ideal), 51.7% (realistic with tracking noise) |
 | **VLM reduction** | 93.3% fewer calls |
+
+## Project Structure
+
+```
+semantic_cache/
+├── README.md                           # This file
+├── __init__.py                         # Package initialization
+├── semantic_cache.py                   # Core implementation (200 lines)
+│
+├── examples/                           # Runnable examples
+│   ├── integration_example.py          # Demo with ideal tracking (99.3% hit rate)
+│   ├── cache_simulation.py             # Realistic simulation with noise (51.7% hit rate)
+│   ├── visualize_cache_performance.py  # Performance visualization
+│   └── generate_report_metrics.py      # Generate all report figures
+│
+├── tests/                              # Unit tests
+│   └── test_semantic_cache.py          # 8 unit tests (all pass)
+│
+├── results/                            # Generated outputs
+│   ├── latency_comparison.png          # Per-frame latency graph
+│   ├── scalability_analysis.png        # Speedup vs frame count
+│   ├── cache_behavior.png              # Cache dynamics over time
+│   ├── cache_performance.png           # 3-plot performance visualization
+│   ├── metrics.json                    # Raw performance data
+│   └── tables.tex                      # LaTeX tables for report
+│
+└── docs/                               # Documentation
+    └── DESIGN_AND_IMPLEMENTATION.md    # Detailed design documentation
+```
+
+## Integration Examples
+
+### Fast Path (Every Frame)
+```python
+# Per-frame processing loop
+tracks = yolo_detector.track(frame)  # ByteTrack
+track_ids = [t.track_id for t in tracks]
+
+# Query cache
+results = cache.get_batch(track_ids, frame_num)
+
+for track in tracks:
+    entry = results[track.track_id]
+    if entry:
+        render_overlay(entry.label, entry.bbox)  # Cache hit
+    else:
+        schedule_vlm(track)  # Cache miss, needs VLM
+```
+
+### Slow Path (Every 15 Frames or On-Demand)
+```python
+# VLM inference
+vlm_output = model.infer(image, prompt)  # ~200ms
+
+# Store in cache
+entry = CacheEntry.from_vlm_output(
+    track_id=track_id,
+    vlm_dict=vlm_output,  # {"label": "person", "confidence": 0.92}
+    bbox=bbox,
+    frame_num=frame_num
+)
+cache.put(entry)
+
+# Next 15 frames will be cache hits!
+```
+
+### With Slow Path Service
+```python
+# Enable local cache
+export USE_LOCAL_SEMANTIC_CACHE=1
+
+# Access shared cache instance
+from slow_path.service.worker import get_local_cache
+cache = get_local_cache()
+```
 
 ## Design Decisions
 
@@ -73,87 +169,30 @@ Oldest entries are most likely stale. This simple policy performs well without L
 **Why batch operations?**
 Fast path queries 5-20 tracks per frame. Batching reduces lock contention and provides cleaner API than repeated `get()` calls.
 
-## Integration
-
-### With Slow Path Service
-```python
-# Enable local cache
-export USE_LOCAL_SEMANTIC_CACHE=1
-
-# Access shared cache instance
-from slow_path.service import get_local_cache
-cache = get_local_cache()
-```
-
-### Fast Path Example
-```python
-# Per-frame loop
-tracks = tracker.update(frame)
-results = cache.get_batch([t.track_id for t in tracks], frame_num)
-
-for track in tracks:
-    entry = results[track.track_id]
-    if entry:
-        render_overlay(entry.label, entry.bbox)
-    else:
-        schedule_vlm(track)  # Cache miss
-```
-
-### Slow Path Example
-```python
-# VLM inference
-vlm_output = model.infer(frame, prompt)
-
-# Store in cache
-entry = CacheEntry.from_vlm_output(
-    track_id=tid,
-    vlm_dict=vlm_output,
-    bbox=bbox,
-    frame_num=frame_num
-)
-cache.put(entry)
-```
-
-## Folder Structure
-
-```
-semantic_cache/
-├── README.md                  # This file
-├── semantic_cache.py          # Core implementation
-├── examples/
-│   ├── integration_example.py       # Standalone demo (99.3% hit rate)
-│   ├── cache_simulation.py          # Realistic simulation with noise
-│   ├── visualize_cache_performance.py  # Generate plots
-│   └── generate_report_metrics.py   # Comprehensive report generation
-├── tests/
-│   └── test_semantic_cache.py       # Unit tests
-└── results/
-    ├── report_figure_latency.png    # Latency comparison graphs
-    ├── report_figure_scalability.png  # Scalability analysis
-    ├── report_figure_cache_behavior.png  # Cache behavior over time
-    ├── report_metrics.json          # Raw data
-    └── report_tables.tex            # LaTeX tables
-```
-
-## Quick Start
+## Testing
 
 ```bash
-# Run unit tests
-python3 semantic_cache/tests/test_semantic_cache.py
+# Run all unit tests
+python3 -m semantic_cache.tests.test_semantic_cache
 
-# Run integration demo (ideal case)
-python3 semantic_cache/examples/integration_example.py
-
-# Generate all report figures and tables
-python3 semantic_cache/examples/generate_report_metrics.py
-
-# Quick performance test
-python3 semantic_cache/examples/visualize_cache_performance.py --frames 100 --mode measure
+# Expected output:
+# Test 1: Basic put and get... PASS
+# Test 2: TTL expiration... PASS
+# Test 3: Batch operations... PASS
+# ...
+# All tests passed!
 ```
 
-## Related Work
+## Dependencies
 
-This implementation is inspired by:
-- SlowFast Networks (Feichtenhofer et al., 2019) - Multi-rate processing
-- Token Merging (Bolya et al., 2023) - Spatial redundancy reduction
-- CacheGen (Liu et al., 2023) - KV cache reuse for LLMs
+**None** - Uses only Python standard library:
+- `dataclasses` - for CacheEntry
+- `threading` - for thread safety
+- `typing` - for type hints
+
+## Documentation
+
+- **API Reference**: This README
+- **Examples**: See [examples/](examples/) directory
+- **Tests**: See [tests/](tests/) directory
+

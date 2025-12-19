@@ -80,7 +80,7 @@ def metrics():
     cache_total = worker.cache_ok + worker.cache_fail
     cache_hit_ratio = (worker.cache_ok / cache_total) if cache_total else 0.0
 
-    # --- Optional: confidence stats per label ---
+    # --- Confidence stats per label ---
     confidences = defaultdict(list)
     for r in worker.results.values():
         if r.get("status")=="done":
@@ -96,9 +96,6 @@ def metrics():
             "results_size": len(worker.results),
             "infer_latency_ms": infer_stats,
             "jobs_enqueued_total": worker.jobs_enqueued_total,
-            "jobs_dropped_total": worker.jobs_dropped_total,
-            "duplicates_skipped": worker.duplicates_skipped,
-            "resolved_skipped": worker.resolved_skipped,
             "jobs_success": success_count,
             "jobs_error": error_count,
             "throughput_jobs_per_sec": throughput,
@@ -143,11 +140,15 @@ def health():
 async def infer(req: InferReq):
     job_id = str(uuid.uuid4())
     prompt = req.prompt_hint or 'Return JSON: {"label": "<category>", "confidence": <0..1>}'
+    
     # decode image from base64 -> numpy array
     img = Image.open(io.BytesIO(base64.b64decode(req.image_b64))).convert("RGB")
     frame_rgb = np.array(img)
-    ok, reason = await worker.try_enqueue(Job(job_id, req.frame_id, req.track_id, req.bbox, frame_rgb, prompt))
-    return {"job_id": job_id, "enqueued": ok, "reason": reason}
+
+    await worker.queue.put(
+        Job(job_id, req.frame_id, req.track_id, req.bbox, frame_rgb, prompt)
+    )
+    return {"job_id": job_id}
 
 @app.get("/result")
 def result(job_id: str):
@@ -184,20 +185,22 @@ async def process_tick(req: TickReq):
         app.state.trigger_seen += 1
         tid = int(roi["track_id"])
         bbox = [int(v) for v in roi["bbox"]]
-        is_resolved = tid in worker.last_semantic_tick
         should, _, why = trigger.should_enqueue(
-            req.frame_id, frame_rgb, bbox, tid, _prev_gray_cache, worker.last_semantic_tick, is_resolved=is_resolved
+            req.frame_id, frame_rgb, bbox, tid, _prev_gray_cache, app.state.last_semantic_tick
         )
 
         if not should:
             continue
         if should:
+            app.state.trigger_enq += 1
             if why.get("scene_change"): app.state.trigger_changed += 1
             if why.get("expired"): app.state.ttl_expired_total += 1
             if why.get("everyN"): app.state.trigger_periodic += 1
 
+            app.state.last_semantic_tick[tid] = req.frame_id
+
             jid = str(uuid.uuid4())
-            ok, reason = await worker.try_enqueue(
+            await worker.queue.put(
                 Job(job_id=jid,
                     frame_id=req.frame_id,
                     track_id=tid,
@@ -205,27 +208,28 @@ async def process_tick(req: TickReq):
                     frame_rgb=frame_rgb,
                     prompt=req.prompt_hint or "")
             )
-            if ok:
-                app.state.trigger_enq += 1
-                enqueued.append({"track_id": tid, "job_id": jid})
+            
+            enqueued.append({"track_id": tid, "job_id": jid})
+            worker.jobs_enqueued_total += 1
 
     return {"enqueued_track_ids": enqueued, "count": len(enqueued)}
 
 
-# -- Programmatic API (small surface) -------------------------------------
+# === Programmatic API (small surface) ===
 """
-The public, programmatic surface for other modules:
+The public surface for other modules:
 
-- ServiceClient: a lightweight synchronous client that runs the FastAPI app
-  in-process (uses TestClient). It triggers the app startup which will start
-  the background worker and exposes convenience methods: infer, trigger_tick,
-  result, metrics, health and close().
+- ServiceClient: 
+    a lightweight synchronous client that runs the FastAPI app
+    in-process (uses TestClient). It triggers the app startup which will start
+    the background worker and exposes convenience methods: infer, trigger_tick,
+    result, metrics, health and close().
 
-- enqueue_infer: async helper to enqueue a Job directly onto the worker
-  queue (useful when calling from an async context within the same process).
+- enqueue_infer: 
+    async helper to enqueue a Job directly onto the worker
+    queue (useful when calling from an async context within the same process).
 
-These keep other modules free from HTTP wiring while reusing the same
-application/worker implementation used by the server.
+Keeping other modules free from HTTP wiring
 """
 
 from fastapi.testclient import TestClient
@@ -286,10 +290,10 @@ class ServiceClient:
 async def enqueue_infer(frame_id: int, track_id: int, bbox: list[int], image_b64: str, prompt_hint: str | None = None) -> str:
     """Enqueue a job directly on the worker queue. Returns job_id.
 
-    This is an async helper intended for use inside an existing asyncio
-    context/process. It does not start the worker loop; ensure the worker
-    is running (for example by creating a ServiceClient which runs startup
-    handlers) before relying on background processing.
+    Async helper intended for use inside an existing asyncio context/process. 
+    It does not start the worker loop; ensure the worker is running 
+    (for example by creating a ServiceClient which runs startup handlers) 
+    before relying on background processing.
     """
     job_id = str(uuid.uuid4())
     prompt = prompt_hint or 'Return JSON: {"label": "<category>", "confidence": <0..1>, "metadata": {...}}'
