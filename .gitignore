@@ -18,4 +18,28 @@ build/
 *.png
 *.csv
 
+# Documentation files (project-specific)
+AGENTS.md
+IMPLEMENTATION_PLAN.md
+
+# Datasets and videos
+MOT16/
+MOT17/
 /MOT17-01-DPM
+football_dataset/
+mot16_dataset/
+football_video/
+*.mp4
+*.avi
+*.mov
+
+# Model weights
+*.pt
+*.pth
+*.onnx
+*.bin
+
+# Benchmark results
+*_results.json
+ground_truth_answers.json
+system_events.jsonl

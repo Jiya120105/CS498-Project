@@ -1,4 +1,4 @@
-import time, json, re, math, torch
+import time, json, re, math, torch, os
 from typing import Literal, Dict, Any
 from transformers import BlipProcessor, BlipForConditionalGeneration, Blip2Processor, Blip2ForConditionalGeneration
 from PIL import Image
@@ -9,10 +9,12 @@ from transformers import AutoModelForVision2Seq, AutoProcessor, MllamaForConditi
 ModelName = Literal["mock", "blip", "blip2", "llama"]  # add "blip2", "minigpt4" later
 
 class MockVLM:
-    def __init__(self, latency_ms: int = 40): self.latency_ms = latency_ms
+    def __init__(self, latency_ms: int = 500): self.latency_ms = latency_ms
     def infer(self, image: Image.Image, prompt: str) -> Dict[str, Any]:
         time.sleep(self.latency_ms / 1000.0)
         return {"label":"player","confidence":0.92,"metadata":{"jersey_color":"blue"}}
+    def batch_infer(self, images, prompts):
+        return [self.infer(im, pr) for im, pr in zip(images, prompts)]
 
 SYSTEM_INSTR = (
     "Describe the image briefly, then format the answer as a single JSON object "
@@ -36,6 +38,8 @@ class Blip2FlanModel:
         out = self.model.generate(**inputs, max_new_tokens=80, do_sample=False)
         text = self.processor.decode(out[0], skip_special_tokens=True).strip()
         return {"label": "background", "confidence": 0.5, "metadata": {"raw": text}}
+    def batch_infer(self, images, prompts):
+        return [self.infer(im, pr) for im, pr in zip(images, prompts)]
 
 
 class BlipModel:
@@ -56,6 +60,8 @@ class BlipModel:
         label = labels[0] if labels is not None else 'background'
         conf = 0.7 if label != "background" else 0.6
         return {"label": label, "confidence": conf, "metadata": {"raw": caption, "labels": labels}}
+    def batch_infer(self, images, prompts):
+        return [self.infer(im, pr) for im, pr in zip(images, prompts)]
     
 class LlamaModel:
     def __init__(self, device=None):
@@ -141,6 +147,124 @@ class LlamaModel:
             metadata = {"meta": str(metadata)}
 
         return {"label": label, "confidence": conf, "metadata": metadata}
+    def batch_infer(self, images, prompts):
+        return [self.infer(im, pr) for im, pr in zip(images, prompts)]
+
+class SmolVLM:
+    def __init__(self, device=None):
+        # Allow explicit device override via env SLOWPATH_DEVICE (e.g., 'cpu', 'cuda', 'cuda:1')
+        dev_override = os.getenv("SLOWPATH_DEVICE")
+        if device is None and dev_override:
+            device = dev_override
+        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        print(f"[SmolVLM] Loading model on {self.device}...")
+        
+        # Load processor
+        self.processor = AutoProcessor.from_pretrained("HuggingFaceTB/SmolVLM-500M-Instruct")
+        # For decoder-only models, use left padding to avoid warning and ensure correct generation
+        try:
+            if hasattr(self.processor, "tokenizer") and hasattr(self.processor.tokenizer, "padding_side"):
+                self.processor.tokenizer.padding_side = "left"
+        except Exception:
+            pass
+        
+        # Load Model
+        # Optimized loading: 500M model is small enough for FP16 on almost any GPU.
+        # Avoid bitsandbytes overhead for small models.
+        if self.device == "cuda":
+            print("[SmolVLM] Loading in float16 on CUDA (fast path)...")
+            self.model = AutoModelForVision2Seq.from_pretrained(
+                "HuggingFaceTB/SmolVLM-500M-Instruct",
+                torch_dtype=torch.float16,
+                _attn_implementation="eager"
+            ).to(self.device)
+        else:
+            # CPU fallback
+            self.model = AutoModelForVision2Seq.from_pretrained(
+                "HuggingFaceTB/SmolVLM-500M-Instruct",
+                _attn_implementation="eager"
+            ).to(self.device)
+            
+        print(f"[SmolVLM] Model loaded. Device: {self.model.device}")
+
+    def infer(self, image: Image.Image, prompt: str) -> Dict[str, Any]:
+        # Construct message
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image"},
+                    {"type": "text", "text": prompt or "Describe this image."}
+                ]
+            },
+        ]
+        
+        # Preprocess
+        text_prompt = self.processor.apply_chat_template(messages, add_generation_prompt=True)
+        inputs = self.processor(text=text_prompt, images=[image], return_tensors="pt")
+        inputs = {k: v.to(self.model.device) for k, v in inputs.items()}
+
+        # Generate
+        generated_ids = self.model.generate(**inputs, max_new_tokens=50)
+        generated_texts = self.processor.batch_decode(
+            generated_ids,
+            skip_special_tokens=True,
+        )
+        
+        # Parse result (The model returns the full prompt + answer usually, or just answer depending on template)
+        # SmolVLM instruction tuned usually returns the Assistant response.
+        raw_text = generated_texts[0]
+        
+        # Simple heuristic to extract the answer part if it repeats prompt
+        if "Assistant:" in raw_text:
+            answer = raw_text.split("Assistant:")[-1].strip()
+        else:
+            answer = raw_text.strip()
+            
+        # Extract label (Yes/No or Category)
+        # We assume the prompt asked for "Yes or No"
+        label = "Unknown"
+        conf = 0.0
+        
+        lower_ans = answer.lower()
+        if "yes" in lower_ans:
+            label = "Yes"
+            conf = 0.95
+        elif "no" in lower_ans:
+            label = "No"
+            conf = 0.95
+        else:
+            # If it's a description, treat as label
+            label = answer[:50] # truncated
+            conf = 0.5
+
+        return {"label": label, "confidence": conf, "metadata": {"raw": answer}}
+
+    def batch_infer(self, images, prompts):
+        # Build chat prompts per sample
+        messages_list = [
+            [{"role": "user", "content": [{"type": "image"}, {"type": "text", "text": pr or "Describe this image."}]}]
+            for pr in prompts
+        ]
+        chats = [self.processor.apply_chat_template(m, add_generation_prompt=True) for m in messages_list]
+        inputs = self.processor(text=chats, images=images, return_tensors="pt", padding=True)
+        inputs = {k: v.to(self.model.device) if hasattr(v, 'to') else v for k, v in inputs.items()}
+        gen_ids = self.model.generate(**inputs, max_new_tokens=50)
+        texts = self.processor.batch_decode(gen_ids, skip_special_tokens=True)
+
+        outs = []
+        for raw_text in texts:
+            answer = raw_text.split("Assistant:")[-1].strip() if "Assistant:" in raw_text else raw_text.strip()
+            lower_ans = answer.lower()
+            label = "Unknown"; conf = 0.0
+            if "yes" in lower_ans:
+                label, conf = "Yes", 0.95
+            elif "no" in lower_ans:
+                label, conf = "No", 0.95
+            else:
+                label, conf = answer[:50], 0.5
+            outs.append({"label": label, "confidence": conf, "metadata": {"raw": answer}})
+        return outs
 
 def load_model(name: ModelName = "mock"):
     if name == "mock":
@@ -151,4 +275,6 @@ def load_model(name: ModelName = "mock"):
         return Blip2FlanModel()
     if name == "llama":
         return LlamaModel()
+    if name == "smol":
+        return SmolVLM()
     raise ValueError(f"Unknown model: {name}")

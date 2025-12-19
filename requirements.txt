@@ -13,3 +13,5 @@ torchvision
 accelerate 
 bitsandbytes
 httpx
+ultralytics
+scipy

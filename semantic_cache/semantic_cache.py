@@ -77,12 +77,13 @@ class SemanticCache:
         # Track number of evictions for diagnostics
         self._evictions: int = 0
 
-    def get(self, track_id: int, current_frame: int) -> Optional[CacheEntry]:
+    def get(self, track_id: int, current_frame: int, ttl: Optional[int] = 15) -> Optional[CacheEntry]:
         """Return CacheEntry for track_id if present and not stale.
 
         Args:
             track_id: id of the tracked object to look up
             current_frame: current frame number used to check staleness
+            ttl: Time-to-live in frames (default 15)
 
         Returns:
             The CacheEntry if found and fresh; otherwise None.
@@ -97,7 +98,8 @@ class SemanticCache:
             if entry is None:
                 self._misses += 1
                 return None
-            if entry.is_stale(current_frame):
+            # If ttl <= 0 or None, treat entries as non-expiring
+            if ttl and ttl > 0 and entry.is_stale(current_frame, ttl=ttl):
                 # treat stale as miss and remove from cache
                 self._misses += 1
                 try:
@@ -108,7 +110,7 @@ class SemanticCache:
             self._hits += 1
             return entry
 
-    def get_batch(self, track_ids: List[int], current_frame: int) -> Dict[int, Optional[CacheEntry]]:
+    def get_batch(self, track_ids: List[int], current_frame: int, ttl: Optional[int] = 15) -> Dict[int, Optional[CacheEntry]]:
         """Return a mapping of track_id -> CacheEntry (or None) for multiple IDs.
 
         This performs the equivalent logic of get() for each id but does so
@@ -118,6 +120,7 @@ class SemanticCache:
         Args:
             track_ids: iterable of track IDs to query
             current_frame: current frame number used to check staleness
+            ttl: Time-to-live in frames (default 15)
 
         Returns:
             Dict mapping each requested track_id to its CacheEntry or None.
@@ -130,7 +133,7 @@ class SemanticCache:
                     self._misses += 1
                     results[tid] = None
                     continue
-                if entry.is_stale(current_frame):
+                if ttl and ttl > 0 and entry.is_stale(current_frame, ttl=ttl):
                     self._misses += 1
                     try:
                         del self._cache[tid]
